@@ -1,7 +1,7 @@
 #    (c) snakenet.org, All rights reserved
 """
 @ai-purpose: Environment CRUD — GLOBAL (not scoped to a Project), thin wrapper over
-  nebular.environments.
+  nebula.environments.
 @ai-context: List/create/update are available to any authenticated caller (an Environment is shared
   infra any project owner needs to be able to add to when creating a key) — delete is admin-only,
   since removing a global Environment can break every Project still linked to it
@@ -16,21 +16,21 @@ import uuid
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular import audit as audit_service
-from nebular import environments as environments_service
-from nebular.api.endpoint import Endpoint, get_current_user
-from nebular.database import get_session
-from nebular.environments import (
+from nebula import audit as audit_service
+from nebula import environments as environments_service
+from nebula.api.endpoint import Endpoint, get_current_user
+from nebula.database import get_session
+from nebula.environments import (
     DuplicateEnvironmentNameError,
     EnvironmentInUseError,
     EnvironmentNotFoundError,
 )
-from nebular.models.environment import (
+from nebula.models.environment import (
     EnvironmentCreateRequest,
     EnvironmentResponse,
     EnvironmentUpdateRequest,
 )
-from nebular.models.tables import Environment, UserAccount
+from nebula.models.tables import Environment, UserAccount
 
 
 class EnvironmentRouter(Endpoint):

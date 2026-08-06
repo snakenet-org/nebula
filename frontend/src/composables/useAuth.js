@@ -1,6 +1,6 @@
-// @ai-purpose: Auth composable — holds the Nebular session and the two login paths.
+// @ai-purpose: Auth composable — holds the Nebula session and the two login paths.
 // @ai-context: Single module-level reactive session, persisted to localStorage. setSession() stores
-//   the AuthResponse (bearer token + X-Nebular-Token + identity/entitlements). loginLocal() posts
+//   the AuthResponse (bearer token + X-Nebula-Token + identity/entitlements). loginLocal() posts
 //   username/password to /api/v1/auth/login (the optional admin login); loginWithOidc() exchanges
 //   Authentik tokens at /api/v1/auth/oidc and also stores the Authentik refresh_token.
 //   scheduleTokenRefresh() fires a background timer ~60s before the access token expires and
@@ -16,7 +16,7 @@
 import { reactive, readonly } from 'vue';
 import { refreshTokens } from '../services/oidc';
 
-const STORAGE_KEY = 'nebular.session';
+const STORAGE_KEY = 'nebula.session';
 let _refreshTimer = null;
 // Shared in-flight promise — prevents concurrent refresh races across all callers.
 let _refreshPromise = null;
@@ -94,7 +94,7 @@ if (state.session?.refreshToken && state.session?.token) {
 function setSession(result) {
   state.session = {
     token: result.token ?? null,
-    nebularToken: result.nebular_token ?? null,
+    nebulaToken: result.nebula_token ?? null,
     user: {
       id: result.id ?? null,
       name: result.name ?? null,

@@ -2,7 +2,7 @@
 """
 @ai-purpose: Shared SQLAlchemy asyncio engine, session factory, and FastAPI session dependency.
 @ai-context: Configures a single async PostgreSQL engine using the asyncpg driver, reading
-  settings.database_url (nebular.config) rather than os.getenv directly. Exports get_session() as a
+  settings.database_url (nebula.config) rather than os.getenv directly. Exports get_session() as a
   FastAPI Depends() provider used by all DB-aware routers, async_session_factory for non-request code
   (startup seeding, the scheduler-less startup canary check in main.py), and Base for ORM model
   declarations.
@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.orm import DeclarativeBase
 
-from nebular.config import settings
+from nebula.config import settings
 
 engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=True)
 

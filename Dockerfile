@@ -1,9 +1,9 @@
 #     (c) snakenet.org, All rights reserved
-#         Nebular Vault Dockerfile
+#         Nebula Vault Dockerfile
 #
-# Nebular Vault is a FastAPI/uvicorn service that serves both the JSON API and the built static SPA
-# portal (from /nebular/public). Unlike every sibling snakeNet app (Gravity/Satellite/Singularity),
-# this image bundles its OWN PostgreSQL 17 instance — Nebular Vault is meant to run as a single,
+# Nebula Vault is a FastAPI/uvicorn service that serves both the JSON API and the built static SPA
+# portal (from /nebula/public). Unlike every sibling snakeNet app (Gravity/Satellite/Singularity),
+# this image bundles its OWN PostgreSQL 17 instance — Nebula Vault is meant to run as a single,
 # self-contained container with no external database dependency (see entrypoint.sh). TLS termination
 # + reverse proxying are still handled externally by Traefik. The Vue frontend is built in a
 # separate Node stage and copied into the final image.
@@ -24,16 +24,16 @@ RUN npm run build
 # necessarily 17.
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 
-WORKDIR /nebular
+WORKDIR /nebula
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     PYTHONUNBUFFERED=1 \
     TZ=Europe/Berlin \
     DEBIAN_FRONTEND=noninteractive \
-    NEBULAR_HOST=0.0.0.0 \
-    NEBULAR_PORT=8000 \
-    NEBULAR_DATA_FOLDER=/data \
+    NEBULA_HOST=0.0.0.0 \
+    NEBULA_PORT=8000 \
+    NEBULA_DATA_FOLDER=/data \
     PGDATA=/data/postgres \
     PATH="/usr/lib/postgresql/17/bin:${PATH}"
 
@@ -54,7 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # the package-managed default cluster would just be dead weight baked into every image layer.
     mkdir -p /etc/postgresql-common && \
     echo "create_main_cluster = false" > /etc/postgresql-common/createcluster.conf && \
-    # GitHub CLI (`gh`) — nebular.github_sync shells out to it for the Project "Sync to GitHub"
+    # GitHub CLI (`gh`) — nebula.github_sync shells out to it for the Project "Sync to GitHub"
     # feature; installed from GitHub's own official apt repo, same signed-repo pattern as PGDG above.
     install -d /etc/apt/keyrings && \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -66,8 +66,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       postgresql-17 postgresql-client-17 gh && \
     rm -rf /var/lib/apt/lists/*
 
-# The embedded Postgres data directory + Nebular's own data folder live here — see entrypoint.sh and
-# NEBULAR_DATA_FOLDER. Mount this as a volume for durability across container recreation.
+# The embedded Postgres data directory + Nebula's own data folder live here — see entrypoint.sh and
+# NEBULA_DATA_FOLDER. Mount this as a volume for durability across container recreation.
 RUN mkdir -p /data
 
 # Install Python dependencies first (cached layer) without building the project itself.

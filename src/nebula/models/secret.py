@@ -3,12 +3,12 @@
 @ai-purpose: Pydantic request/response models for api/v1/secret.py.
 @ai-context: Since the 2026-08-06 global-environments redesign, a SecretKey carries exactly one
   Environment link and its own value directly. variable_type (environment/secret,
-  nebular.models.tables.VariableType) drives BOTH storage-independent masking rules: a "secret" key's
+  nebula.models.tables.VariableType) drives BOTH storage-independent masking rules: a "secret" key's
   SecretKeyResponse.value is always null (is_set is presence-only) — plaintext only ever reaches the
   frontend via the separate can_reveal-gated SecretRevealResponse, fetched on demand. An "environment"
   key's `value` IS included directly in SecretKeyResponse (decrypted server-side in api/v1/secret.py's
   `_to_response`) since it isn't meant to be anonymized — still encrypted at rest identically to a
-  secret (see nebular.crypto), the distinction is purely a frontend display/reveal-gating rule, not an
+  secret (see nebula.crypto), the distinction is purely a frontend display/reveal-gating rule, not an
   encryption one.
 @version: 3.1.0
 @author: Marc Fiedler <marc@snakenet.org>
@@ -20,7 +20,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from nebular.models.tables import VariableType
+from nebula.models.tables import VariableType
 
 
 class SecretKeyCreateRequest(BaseModel):

@@ -1,7 +1,7 @@
 #    (c) snakenet.org, All rights reserved
 """
 @ai-purpose: Project CRUD, sharing, and the permission matrix every other feature module builds on.
-@ai-context: A nebular-user (non-admin) can only ever see a Project via ownership or an explicit
+@ai-context: A nebula-user (non-admin) can only ever see a Project via ownership or an explicit
   ProjectShare row — enforced here in list_projects/get_visible_project (never trusted to the
   caller). Permission helpers all take the already-resolved `actor` UserAccount + `project` +
   (where relevant) the caller's own ProjectShare row, resolved once per request by the router layer
@@ -10,7 +10,7 @@
     - can_edit    — owner, admin, or ProjectShare.role == EDITOR. Governs environments/keys/values
                     CRUD and editing the project's own name/description.
     - can_reveal  — owner or admin ONLY, regardless of share role. A shared EDITOR can create/change
-                    values but never decrypt one back — see nebular.secrets.reveal_value.
+                    values but never decrypt one back — see nebula.secrets.reveal_value.
     - can_manage_sharing / can_manage_access_keys / can_delete — owner or admin only.
   These mirror gravity.pulsars' can_edit/can_change_state shape: bare functions taking already-loaded
   objects, no ORM queries of their own, so a router can resolve everything it needs in one pass and
@@ -30,7 +30,7 @@ import uuid
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular.models.tables import Project, ProjectShare, SecretKey, ShareRole, UserAccount
+from nebula.models.tables import Project, ProjectShare, SecretKey, ShareRole, UserAccount
 
 
 class ProjectNotFoundError(Exception):
@@ -125,7 +125,7 @@ async def secret_key_count_for_project(session: AsyncSession, project_id: uuid.U
     """How many SecretKeys this Project has — used to populate ProjectResponse.
 
     Environments are global (not project-scoped) since the 2026-08-06 redesign, so there is no
-    per-project environment count anymore — see nebular.environments.list_environments instead.
+    per-project environment count anymore — see nebula.environments.list_environments instead.
     """
     return (
         await session.execute(

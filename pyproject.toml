@@ -10,9 +10,9 @@
 #   Date: 2026-08-06
 
 [project]
-name = "nebular"
+name = "nebula"
 version = "2.0.0"
-description = "Nebular Vault, a self-hosted secrets manager for snakeNet.org"
+description = "Nebula Vault, a self-hosted secrets manager for snakeNet.org"
 readme = "README.md"
 license = {text = "Apache Software License 2.0"}
 requires-python = ">=3.14"
@@ -55,4 +55,4 @@ build-backend = "uv_build"
 dev = []
 
 [project.scripts]
-nebular = "nebular:main"
+nebula = "nebula:main"

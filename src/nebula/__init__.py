@@ -2,8 +2,8 @@
 """
 @ai-purpose: Package metadata + console-script entry point.
 @ai-context: `version` is read by main.py (FastAPI app version, Server header) and the frontend's
-  About view (via GET /api/v1/config). `main()` is the `nebular` console script installed by
-  pyproject.toml's [project.scripts] — a thin wrapper around main.run() so `uv run nebular` works
+  About view (via GET /api/v1/config). `main()` is the `nebula` console script installed by
+  pyproject.toml's [project.scripts] — a thin wrapper around main.run() so `uv run nebula` works
   the same as `uv run main.py`.
 @ai-rules:
   - Bump `version` together with pyproject.toml's [project] version on every release-worthy change.
@@ -18,7 +18,7 @@ version = "2.0.0"
 
 
 def main() -> None:
-    """Console-script entry point (`uv run nebular`)."""
+    """Console-script entry point (`uv run nebula`)."""
     from main import run
 
     run()

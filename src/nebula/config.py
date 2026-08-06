@@ -3,15 +3,15 @@
 @ai-purpose: Central, typed configuration loaded once from the environment / .env.
 @ai-context: Every other module reads settings from the `settings` singleton built here instead of
   calling os.getenv directly, mirroring Gravity/Satellite/Singularity's own config.py convention.
-  Groups the server (incl. log_level), the X-Nebular-Token shared secret, the master encryption key
-  (master_key — see nebular.crypto, REQUIRED, no default; `require_master_key()` raises a clear
+  Groups the server (incl. log_level), the X-Nebula-Token shared secret, the master encryption key
+  (master_key — see nebula.crypto, REQUIRED, no default; `require_master_key()` raises a clear
   RuntimeError rather than letting a missing key surface later as a confusing decrypt failure), the
   locally minted HS256 session JWT (username/password login — the "optional admin login"), snakeNet
   ID (Authentik) OIDC parameters, and PostgreSQL. Derived values (the async asyncpg DB URL, the
   Authentik authorize/token/end-session endpoints) are exposed as computed properties so callers
   never re-assemble them. Loaded at import time; `load_dotenv()` runs first so a local .env wins.
 @ai-rules:
-  - Never log secret fields (nebular_token, master_key, jwt_secret, db password).
+  - Never log secret fields (nebula_token, master_key, jwt_secret, db password).
   - Read config ONLY through `settings`; do not scatter os.getenv across the codebase.
   - Maintain 100% type-hinting coverage.
 @dependencies: python-dotenv
@@ -30,7 +30,7 @@ load_dotenv()
 
 
 def _bool(name: str, default: bool = False) -> bool:
-    """Interpret a NEBULAR_* flag: 'yes'/'true'/'1'/'on' → True (case-insensitive)."""
+    """Interpret a NEBULA_* flag: 'yes'/'true'/'1'/'on' → True (case-insensitive)."""
     raw = os.getenv(name)
     if raw is None:
         return default
@@ -42,71 +42,71 @@ class Settings:
     """Immutable snapshot of the process configuration."""
 
     # ── Server ──────────────────────────────────────────────────────────────
-    host: str = field(default_factory=lambda: os.getenv("NEBULAR_HOST", "localhost"))
-    port: int = field(default_factory=lambda: int(os.getenv("NEBULAR_PORT", "8000")))
-    dev: bool = field(default_factory=lambda: _bool("NEBULAR_DEV", False))
+    host: str = field(default_factory=lambda: os.getenv("NEBULA_HOST", "localhost"))
+    port: int = field(default_factory=lambda: int(os.getenv("NEBULA_PORT", "8000")))
+    dev: bool = field(default_factory=lambda: _bool("NEBULA_DEV", False))
     log_level: str = field(
         default_factory=lambda: (
-            os.getenv("NEBULAR_LOG_LEVEL", "").strip().upper()
-            or ("DEBUG" if _bool("NEBULAR_DEV", False) else "ERROR")
+            os.getenv("NEBULA_LOG_LEVEL", "").strip().upper()
+            or ("DEBUG" if _bool("NEBULA_DEV", False) else "ERROR")
         )
     )
 
-    # ── X-Nebular-Token (shared API service secret, required on every non-public route) ────
-    nebular_token: str = field(default_factory=lambda: os.getenv("NEBULAR_TOKEN", ""))
+    # ── X-Nebula-Token (shared API service secret, required on every non-public route) ────
+    nebula_token: str = field(default_factory=lambda: os.getenv("NEBULA_TOKEN", ""))
 
-    # ── Master encryption key (see nebular.crypto) — REQUIRED, no safe default ──────────────
-    master_key: str = field(default_factory=lambda: os.getenv("NEBULAR_MASTER_KEY", ""))
+    # ── Master encryption key (see nebula.crypto) — REQUIRED, no safe default ──────────────
+    master_key: str = field(default_factory=lambda: os.getenv("NEBULA_MASTER_KEY", ""))
 
     # ── Local username/password login (HS256 session tokens — the optional admin login) ────
-    jwt_secret: str = field(default_factory=lambda: os.getenv("NEBULAR_JWT_SECRET", ""))
-    jwt_ttl: int = field(default_factory=lambda: int(os.getenv("NEBULAR_JWT_TTL", "3600")))
-    admin_user: str = field(default_factory=lambda: os.getenv("NEBULAR_ADMIN_USER", ""))
-    admin_pass: str = field(default_factory=lambda: os.getenv("NEBULAR_ADMIN_PASS", ""))
-    admin_email: str = field(default_factory=lambda: os.getenv("NEBULAR_ADMIN_EMAIL", ""))
+    jwt_secret: str = field(default_factory=lambda: os.getenv("NEBULA_JWT_SECRET", ""))
+    jwt_ttl: int = field(default_factory=lambda: int(os.getenv("NEBULA_JWT_TTL", "3600")))
+    admin_user: str = field(default_factory=lambda: os.getenv("NEBULA_ADMIN_USER", ""))
+    admin_pass: str = field(default_factory=lambda: os.getenv("NEBULA_ADMIN_PASS", ""))
+    admin_email: str = field(default_factory=lambda: os.getenv("NEBULA_ADMIN_EMAIL", ""))
 
     # ── snakeNet ID (Authentik OIDC) ────────────────────────────────────────
     oidc_authority: str = field(
-        default_factory=lambda: os.getenv("NEBULAR_OIDC_AUTHORITY", "https://id.snakenet.io")
+        default_factory=lambda: os.getenv("NEBULA_OIDC_AUTHORITY", "https://id.snakenet.io")
     )
     oidc_application_slug: str = field(
-        default_factory=lambda: os.getenv("NEBULAR_OIDC_APPLICATION_SLUG", "nebular")
+        default_factory=lambda: os.getenv("NEBULA_OIDC_APPLICATION_SLUG", "nebula")
     )
-    oidc_client_id: str = field(default_factory=lambda: os.getenv("NEBULAR_OIDC_CLIENT_ID", ""))
-    oidc_jwks_url: str = field(default_factory=lambda: os.getenv("NEBULAR_OIDC_JWKS_URL", ""))
-    oidc_issuer: str = field(default_factory=lambda: os.getenv("NEBULAR_OIDC_ISSUER", ""))
-    oidc_audience: str = field(default_factory=lambda: os.getenv("NEBULAR_OIDC_AUDIENCE", ""))
+    oidc_client_id: str = field(default_factory=lambda: os.getenv("NEBULA_OIDC_CLIENT_ID", ""))
+    oidc_jwks_url: str = field(default_factory=lambda: os.getenv("NEBULA_OIDC_JWKS_URL", ""))
+    oidc_issuer: str = field(default_factory=lambda: os.getenv("NEBULA_OIDC_ISSUER", ""))
+    oidc_audience: str = field(default_factory=lambda: os.getenv("NEBULA_OIDC_AUDIENCE", ""))
     oidc_groups_claim: str = field(
-        default_factory=lambda: os.getenv("NEBULAR_OIDC_GROUPS_CLAIM", "groups")
+        default_factory=lambda: os.getenv("NEBULA_OIDC_GROUPS_CLAIM", "groups")
     )
     basic_login_disabled: bool = field(
-        default_factory=lambda: _bool("NEBULAR_BASIC_LOGIN_DISABLED", False)
+        default_factory=lambda: _bool("NEBULA_BASIC_LOGIN_DISABLED", False)
     )
     oidc_login_disabled: bool = field(
-        default_factory=lambda: _bool("NEBULAR_OIDC_LOGIN_DISABLED", True)
+        default_factory=lambda: _bool("NEBULA_OIDC_LOGIN_DISABLED", True)
     )
     oidc_login_caption: str = field(
-        default_factory=lambda: os.getenv("NEBULAR_OIDC_LOGIN_CAPTION", "Sign in with snakeNet ID")
+        default_factory=lambda: os.getenv("NEBULA_OIDC_LOGIN_CAPTION", "Sign in with snakeNet ID")
     )
 
     # ── PostgreSQL ────────────────────────────────────────────────────────────
-    pg_host: str = field(default_factory=lambda: os.getenv("NEBULAR_POSTGRES_HOST", "localhost"))
-    pg_port: int = field(default_factory=lambda: int(os.getenv("NEBULAR_POSTGRES_PORT", "5432")))
-    pg_db: str = field(default_factory=lambda: os.getenv("NEBULAR_POSTGRES_DB", "nebular"))
-    pg_user: str = field(default_factory=lambda: os.getenv("NEBULAR_POSTGRES_USER", "postgres"))
+    pg_host: str = field(default_factory=lambda: os.getenv("NEBULA_POSTGRES_HOST", "localhost"))
+    pg_port: int = field(default_factory=lambda: int(os.getenv("NEBULA_POSTGRES_PORT", "5432")))
+    pg_db: str = field(default_factory=lambda: os.getenv("NEBULA_POSTGRES_DB", "nebula"))
+    pg_user: str = field(default_factory=lambda: os.getenv("NEBULA_POSTGRES_USER", "postgres"))
     pg_password: str = field(
-        default_factory=lambda: os.getenv("NEBULAR_POSTGRES_PASSWORD", "")
+        default_factory=lambda: os.getenv("NEBULA_POSTGRES_PASSWORD", "")
     )
 
     # ── Data folder (the embedded Postgres data directory lives under here) ─────────────────
     data_folder: str = field(
-        default_factory=lambda: os.getenv("NEBULAR_DATA_FOLDER", "") or "/data"
+        default_factory=lambda: os.getenv("NEBULA_DATA_FOLDER", "") or "/data"
     )
 
     # ── Derived values ────────────────────────────────────────────────────────
     @cached_property
     def database_url(self) -> str:
-        """Async SQLAlchemy URL (asyncpg driver) built from the NEBULAR_POSTGRES_* vars."""
+        """Async SQLAlchemy URL (asyncpg driver) built from the NEBULA_POSTGRES_* vars."""
         return (
             f"postgresql+asyncpg://{self.pg_user}:{self.pg_password}"
             f"@{self.pg_host}:{self.pg_port}/{self.pg_db}"
@@ -125,15 +125,15 @@ class Settings:
         return f"{self.oidc_authority}/application/o/{self.oidc_application_slug}/end-session/"
 
     def require_master_key(self) -> str:
-        """Return NEBULAR_MASTER_KEY or raise — the one setting with no safe default.
+        """Return NEBULA_MASTER_KEY or raise — the one setting with no safe default.
 
-        Called by nebular.crypto on first use rather than at Settings construction time, so
+        Called by nebula.crypto on first use rather than at Settings construction time, so
         importing this module (e.g. for `alembic` autogenerate, which never encrypts anything)
         never fails just because the env var isn't set yet.
         """
         if not self.master_key:
             raise RuntimeError(
-                "NEBULAR_MASTER_KEY is not configured — Nebular Vault refuses to encrypt or "
+                "NEBULA_MASTER_KEY is not configured — Nebula Vault refuses to encrypt or "
                 "decrypt secret values without it. Set it before starting the app."
             )
         return self.master_key

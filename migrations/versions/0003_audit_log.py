@@ -1,11 +1,11 @@
 #    (c) snakenet.org, All rights reserved
 """audit log
 
-Adds audit_log_entries — an append-only log of every mutating action taken through Nebular, both
-by a logged-in human (nebular.audit's ActorType.USER — project/environment/secret CRUD, sharing,
+Adds audit_log_entries — an append-only log of every mutating action taken through Nebula, both
+by a logged-in human (nebula.audit's ActorType.USER — project/environment/secret CRUD, sharing,
 access-key management, login/logout, reveal) and by a Project access key hitting the external
 vault retrieval route (ActorType.ACCESS_KEY — the "API calls" tab, `success=False` rows also back
-the dashboard's failed-retrieval chart). See nebular.audit and api/v1/audit.py.
+the dashboard's failed-retrieval chart). See nebula.audit and api/v1/audit.py.
 
 Revision ID: 0003_audit_log
 Revises: 0002_global_environments

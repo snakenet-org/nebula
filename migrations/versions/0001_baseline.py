@@ -1,10 +1,10 @@
 #    (c) snakenet.org, All rights reserved
 """baseline schema
 
-Initial Nebular schema: local user accounts (username/password + OIDC-provisioned login),
+Initial Nebula schema: local user accounts (username/password + OIDC-provisioned login),
 projects + sharing, environments, secret keys + their per-environment encrypted values, project
 access keys (the REST API credential), and the single-row vault_meta canary table used to detect a
-wrong NEBULAR_MASTER_KEY at startup (see nebular.crypto).
+wrong NEBULA_MASTER_KEY at startup (see nebula.crypto).
 
 Revision ID: 0001_baseline
 Revises:

@@ -1,18 +1,18 @@
 #    (c) snakenet.org, All rights reserved
 """
 @ai-purpose: SecretKey CRUD + value set/reveal — the encrypted key-value store itself.
-@ai-context: The one module (besides nebular.crypto) that ever touches plaintext secret values.
+@ai-context: The one module (besides nebula.crypto) that ever touches plaintext secret values.
   Since the 2026-08-06 global-environments redesign, a SecretKey carries its OWN `ciphertext` and
   `environment_id` directly — every key/value pair is linked to exactly one Environment, reassigned
   via update_key's `environment_id` param (never unset, never multi-valued — the old per-environment
   SecretValue join table and its "apply to all environments" convenience are both gone). set_value
-  encrypts via nebular.crypto.encrypt_value before it ever reaches the session — the plaintext
+  encrypts via nebula.crypto.encrypt_value before it ever reaches the session — the plaintext
   argument is never persisted raw. reveal_value is the only function that calls
-  nebular.crypto.decrypt_value — callers (api/v1/secret.py's reveal route, api/v1/vault.py's
+  nebula.crypto.decrypt_value — callers (api/v1/secret.py's reveal route, api/v1/vault.py's
   external retrieval route) must have already checked the caller may see plaintext (can_reveal for
   the human route, project-access-key possession for the machine route) before calling it; this
   module does not re-check that itself, since "may this actor see plaintext" is a Project-level
-  question answered by nebular.projects, not a secret-key-level one. create_keys_bulk backs the
+  question answered by nebula.projects, not a secret-key-level one. create_keys_bulk backs the
   Project view's "Upload .env" flow — always creates brand-new keys (never updates an existing key's
   value), all-or-nothing in one commit.
 @ai-rules:
@@ -31,8 +31,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular.crypto import decrypt_value, encrypt_value
-from nebular.models.tables import SecretKey, VariableType
+from nebula.crypto import decrypt_value, encrypt_value
+from nebula.models.tables import SecretKey, VariableType
 
 
 class DuplicateSecretKeyNameError(Exception):
@@ -218,7 +218,7 @@ async def create_keys_bulk(
 async def reveal_value(session: AsyncSession, key: SecretKey) -> str:
     """Decrypt and return this key's plaintext value.
 
-    Callers MUST have already authorized the caller for plaintext access (nebular.projects.
+    Callers MUST have already authorized the caller for plaintext access (nebula.projects.
     can_reveal, or a valid ProjectAccessKey) — this function performs no permission check itself.
     """
     if key.ciphertext is None:

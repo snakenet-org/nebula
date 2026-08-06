@@ -1,9 +1,9 @@
 {
-  "name": "nebular-frontend",
+  "name": "nebula-frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "Nebular Vault portal — lightweight Vue 3 SPA served by the FastAPI backend.",
+  "description": "Nebula Vault portal — lightweight Vue 3 SPA served by the FastAPI backend.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

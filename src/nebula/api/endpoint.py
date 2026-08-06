@@ -1,9 +1,9 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: Abstract base router class + shared auth gates every Nebular API endpoint uses.
-@ai-context: Endpoint(APIRouter) is the parent of every v1 router. Nebular protects its API with two
+@ai-purpose: Abstract base router class + shared auth gates every Nebula API endpoint uses.
+@ai-context: Endpoint(APIRouter) is the parent of every v1 router. Nebula protects its API with two
   cooperating gates (mirrors Satellite's api/endpoint.py exactly):
-    1. verify_nebular_token — header `X-Nebular-Token` must equal env NEBULAR_TOKEN (a coarse shared
+    1. verify_nebula_token — header `X-Nebula-Token` must equal env NEBULA_TOKEN (a coarse shared
        service secret carried on EVERY request, including auth and the public config/health routes).
     2. verify_jwt_token — `Authorization: Bearer <token>`. Accepts BOTH a locally minted HS256 token
        (from POST /auth/login, the optional admin login) AND an Authentik RS256 access token
@@ -15,7 +15,7 @@
   the fly if somehow not yet provisioned, though the normal path is POST /auth/oidc doing that once
   at login) — used by every route that needs to check ownership/sharing, not just "is logged in".
   api/v1/vault.py is the one router that does NOT use verify_jwt_token/get_current_user at all — it
-  authenticates via a ProjectAccessKey bearer token instead (nebular.access_keys.resolve_access_key),
+  authenticates via a ProjectAccessKey bearer token instead (nebula.access_keys.resolve_access_key),
   a third, deliberately separate credential kind for machine callers.
 @ai-rules:
   - All API routers must extend Endpoint, not APIRouter directly.
@@ -35,15 +35,15 @@ from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBea
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular import users
-from nebular.config import settings
-from nebular.database import get_session
-from nebular.entitlements import entitlements_for_groups, has_access, is_admin
-from nebular.models.tables import UserAccount
-from nebular.security import LOCAL_ISSUER, decode_local_token
+from nebula import users
+from nebula.config import settings
+from nebula.database import get_session
+from nebula.entitlements import entitlements_for_groups, has_access, is_admin
+from nebula.models.tables import UserAccount
+from nebula.security import LOCAL_ISSUER, decode_local_token
 
 # ── Bearer JWT scheme ───────────────────────────────────────────────────────
-NEBULAR_JWT_TOKEN = HTTPBearer(auto_error=True)
+NEBULA_JWT_TOKEN = HTTPBearer(auto_error=True)
 
 # Lazily-built, cached JWKS client (fetches + caches Authentik's signing keys).
 _jwks_client: jwt.PyJWKClient | None = None
@@ -55,7 +55,7 @@ def _get_jwks_client() -> jwt.PyJWKClient:
     if _jwks_client is None:
         if not settings.oidc_jwks_url:
             raise HTTPException(
-                status_code=500, detail="OIDC not configured (NEBULAR_OIDC_JWKS_URL)"
+                status_code=500, detail="OIDC not configured (NEBULA_OIDC_JWKS_URL)"
             )
         _jwks_client = jwt.PyJWKClient(settings.oidc_jwks_url)
     return _jwks_client
@@ -104,7 +104,7 @@ def decode_any_token(token: str) -> dict:
 
 
 def verify_jwt_token(
-    credentials: HTTPAuthorizationCredentials = Depends(NEBULAR_JWT_TOKEN),
+    credentials: HTTPAuthorizationCredentials = Depends(NEBULA_JWT_TOKEN),
 ) -> str:
     """Gate: require a valid bearer JWT (local HS256 or Authentik RS256). Returns the raw token."""
     decode_any_token(credentials.credentials)
@@ -112,7 +112,7 @@ def verify_jwt_token(
 
 
 def get_jwt_claims(
-    credentials: HTTPAuthorizationCredentials = Depends(NEBULAR_JWT_TOKEN),
+    credentials: HTTPAuthorizationCredentials = Depends(NEBULA_JWT_TOKEN),
 ) -> dict:
     """Handler-level dependency: decode and return the caller's validated claims (`sub`, `groups`…)."""
     return decode_any_token(credentials.credentials)
@@ -124,7 +124,7 @@ async def get_current_user(
 ) -> UserAccount:
     """Resolve the caller's UserAccount row, enforcing the coarse "has any entitlement" check.
 
-    A local-login token's `sub` is the Nebular user id itself (security.create_access_token mints it
+    A local-login token's `sub` is the Nebula user id itself (security.create_access_token mints it
     that way); an Authentik token's `sub` is Authentik's own external subject id, distinguished here
     via the `iss` claim (LOCAL_ISSUER vs. anything else). The normal path for an OIDC identity is
     already provisioned once at POST /auth/oidc — the on-the-fly provision_oidc_user call below is a
@@ -149,38 +149,38 @@ async def get_current_user(
 
 
 def client_ip(request: Request) -> str | None:
-    """Best-effort caller IP — used only as an nebular.audit AuditLogEntry.ip_address hint."""
+    """Best-effort caller IP — used only as an nebula.audit AuditLogEntry.ip_address hint."""
     return request.client.host if request.client else None
 
 
-# ── X-Nebular-Token (shared service secret) ──────────────────────────────────
-X_NEBULAR_TOKEN_SCHEME = APIKeyHeader(name="X-Nebular-Token", auto_error=False)
+# ── X-Nebula-Token (shared service secret) ──────────────────────────────────
+X_NEBULA_TOKEN_SCHEME = APIKeyHeader(name="X-Nebula-Token", auto_error=False)
 
 
-def verify_nebular_token(token: str = Depends(X_NEBULAR_TOKEN_SCHEME)) -> str:
-    """Gate: validate the presence and value of the X-Nebular-Token header."""
-    expected = settings.nebular_token
+def verify_nebula_token(token: str = Depends(X_NEBULA_TOKEN_SCHEME)) -> str:
+    """Gate: validate the presence and value of the X-Nebula-Token header."""
+    expected = settings.nebula_token
     if not token:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing X-Nebular-Token"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing X-Nebula-Token"
         )
     if not expected or token != expected:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid X-Nebular-Token"
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid X-Nebula-Token"
         )
     return token
 
 
 class Endpoint(APIRouter):
-    """Base router. By default injects the X-Nebular-Token + JWT gates on every route.
+    """Base router. By default injects the X-Nebula-Token + JWT gates on every route.
 
     Pass ``public=True`` to drop both gates (auth/health/ping/config, and api/v1/vault.py — which
-    adds its own X-Nebular-Token + project-access-key gates manually instead).
+    adds its own X-Nebula-Token + project-access-key gates manually instead).
     """
 
     def __init__(self, public: bool = False, *args, **kwargs):
         router_dependencies = kwargs.pop("dependencies", [])
         if not public:
-            router_dependencies.append(Depends(verify_nebular_token))
+            router_dependencies.append(Depends(verify_nebula_token))
             router_dependencies.append(Depends(verify_jwt_token))
         super().__init__(*args, dependencies=router_dependencies, **kwargs)

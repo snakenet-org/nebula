@@ -2,15 +2,15 @@
 """
 @ai-purpose: Push a Project's keys/values into a GitHub repository, via the `gh` CLI.
 @ai-context: A Project may optionally carry a `github_repo_url` + an encrypted `github_pat_
-  ciphertext` (nebular.models.tables.Project, set together via update_github_config — a PAT is a
-  credential like any secret value, encrypted the same way via nebular.crypto.encrypt_value, never
+  ciphertext` (nebula.models.tables.Project, set together via update_github_config — a PAT is a
+  credential like any secret value, encrypted the same way via nebula.crypto.encrypt_value, never
   returned from any API response). sync_to_github() is the actual push: authenticates by setting
   `GH_TOKEN` in the `gh` subprocess's environment (never `gh auth login` — that would persist a
   credential to disk; `GH_TOKEN` is a one-shot, in-memory-only override per gh's own docs) and first
   runs `gh repo view` as the "does this token actually work against this repo" gate the product ask
   calls "if the connection works" — a non-zero exit there raises GitHubAuthError before touching
   anything. Every SecretKey with a value set is then pushed into a GitHub Environment named exactly
-  like the Nebular Environment it's linked to (`gh api -X PUT .../environments/<name>` first ensures
+  like the Nebula Environment it's linked to (`gh api -X PUT .../environments/<name>` first ensures
   that GitHub Environment exists, matching gh's own idempotent-PUT semantics) — variable_type SECRET
   goes through `gh secret set`, variable_type ENVIRONMENT goes through `gh variable set`. Best-effort
   per key: one key's `gh` failure is collected into `failures` and does not abort the rest of the
@@ -23,7 +23,7 @@
   - Never log a plaintext value, PAT, or full `gh` stderr verbatim if it could echo one back
     (`gh`'s own error messages don't echo secret values, so surfacing stderr text is safe here).
   - Maintain 100% type-hinting coverage.
-@dependencies: nebular.crypto
+@dependencies: nebula.crypto
 @version: 1.0.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-06
@@ -36,10 +36,10 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular import environments as environments_service
-from nebular import secrets as secrets_service
-from nebular.crypto import decrypt_value, encrypt_value
-from nebular.models.tables import Project, SecretKey, VariableType
+from nebula import environments as environments_service
+from nebula import secrets as secrets_service
+from nebula.crypto import decrypt_value, encrypt_value
+from nebula.models.tables import Project, SecretKey, VariableType
 
 _REPO_URL_RE = re.compile(
     r"^(?:https?://github\.com/|git@github\.com:)?([\w.-]+)/([\w.-]+?)(?:\.git)?/?$"
@@ -113,7 +113,7 @@ async def _run_gh(
             stderr=asyncio.subprocess.PIPE,
         )
     except FileNotFoundError as exc:
-        raise GitHubAuthError("The `gh` CLI is not installed on the Nebular server.") from exc
+        raise GitHubAuthError("The `gh` CLI is not installed on the Nebula server.") from exc
 
     stdin_bytes = input_data.encode() if input_data is not None else None
     stdout, stderr = await proc.communicate(stdin_bytes)

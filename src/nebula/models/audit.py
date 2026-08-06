@@ -11,7 +11,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from nebular.models.tables import ActorType
+from nebula.models.tables import ActorType
 
 
 class AuditLogEntryResponse(BaseModel):

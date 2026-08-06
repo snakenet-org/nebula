@@ -1,10 +1,10 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: SecretKey CRUD + value set/reveal — thin wrapper over nebular.secrets.
+@ai-purpose: SecretKey CRUD + value set/reveal — thin wrapper over nebula.secrets.
 @ai-context: Since the 2026-08-06 global-environments redesign, a key carries exactly one
   Environment link; list_keys/get_key responses carry PRESENCE ONLY (is_set), never ciphertext.
   Setting a value or reassigning environment_id requires can_edit; revealing one requires can_reveal
-  (owner/admin only — see nebular.projects' module docstring for why a shared EDITOR can change a
+  (owner/admin only — see nebula.projects' module docstring for why a shared EDITOR can change a
   value but never decrypt one back). bulk_create_keys backs the Project view's "Upload .env" button —
   same can_edit gate, always creates brand-new keys (409s naming every conflict rather than updating
   an existing key), one Environment/variable_type applied to the whole batch.
@@ -22,13 +22,13 @@ import uuid
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular import audit as audit_service
-from nebular import environments as environments_service
-from nebular import projects as projects_service
-from nebular import secrets as secrets_service
-from nebular.api.endpoint import Endpoint, get_current_user
-from nebular.database import get_session
-from nebular.models.secret import (
+from nebula import audit as audit_service
+from nebula import environments as environments_service
+from nebula import projects as projects_service
+from nebula import secrets as secrets_service
+from nebula.api.endpoint import Endpoint, get_current_user
+from nebula.database import get_session
+from nebula.models.secret import (
     SecretBulkCreateRequest,
     SecretKeyCreateRequest,
     SecretKeyResponse,
@@ -36,9 +36,9 @@ from nebular.models.secret import (
     SecretRevealResponse,
     SecretValueSetRequest,
 )
-from nebular.models.tables import SecretKey, UserAccount, VariableType
-from nebular.projects import ProjectNotFoundError
-from nebular.secrets import (
+from nebula.models.tables import SecretKey, UserAccount, VariableType
+from nebula.projects import ProjectNotFoundError
+from nebula.secrets import (
     BulkCreateConflictError,
     BulkDuplicateKeyNamesError,
     DuplicateSecretKeyNameError,

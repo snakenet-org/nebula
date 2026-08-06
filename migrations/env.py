@@ -1,8 +1,8 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: Alembic migration environment for the Nebular database.
-@ai-context: Wires Alembic to the application's SQLAlchemy metadata (nebular.database.Base, with all
-  ORM tables imported from nebular.models.tables) and reuses nebular.config.settings for the async
+@ai-purpose: Alembic migration environment for the Nebula database.
+@ai-context: Wires Alembic to the application's SQLAlchemy metadata (nebula.database.Base, with all
+  ORM tables imported from nebula.models.tables) and reuses nebula.config.settings for the async
   asyncpg connection URL — same source of truth the app itself connects with. Used by
   `alembic revision --autogenerate` and `alembic upgrade head` (run from entrypoint.sh on start).
   `_ensure_database_exists()` runs first, connecting to the `postgres` maintenance database to
@@ -10,7 +10,7 @@
   already handles this itself for its embedded Postgres (a first-boot `createdb` before `alembic
   upgrade head`), but `alembic upgrade head` run directly against an external/local Postgres (see
   docs/deployment.md's "Building from source" section) has no equivalent, so it always failed on a
-  brand-new server with no NEBULAR_POSTGRES_DB database yet — this makes alembic self-sufficient
+  brand-new server with no NEBULA_POSTGRES_DB database yet — this makes alembic self-sufficient
   either way.
 @ai-rules:
   - Never expose raw DB credentials in logs or API responses.
@@ -31,9 +31,9 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 
 # Import the metadata + all ORM tables so autogenerate can see the full schema.
-import nebular.models.tables  # noqa: F401  (registers every table on Base.metadata)
-from nebular.config import settings
-from nebular.database import Base
+import nebula.models.tables  # noqa: F401  (registers every table on Base.metadata)
+from nebula.config import settings
+from nebula.database import Base
 
 config = context.config
 
@@ -63,7 +63,7 @@ async def _ensure_database_exists() -> None:
         )
         if not exists:
             # CREATE DATABASE can't be parameterized or run inside a transaction; pg_db is
-            # operator-supplied server config (NEBULAR_POSTGRES_DB), not untrusted user input.
+            # operator-supplied server config (NEBULA_POSTGRES_DB), not untrusted user input.
             await conn.execute(f'CREATE DATABASE "{settings.pg_db}"')
     finally:
         await conn.close()

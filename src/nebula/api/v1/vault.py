@@ -4,15 +4,15 @@
 @ai-context: Deliberately a THIRD auth mode alongside human-JWT (project.py/secret.py/...) and the
   public no-credential routes (health/ping/config/auth) — a spawned container pulls its own secrets
   at deploy time by presenting a project access key, not a user session. Still requires
-  X-Nebular-Token (every API call does, per spec) — added as an explicit router-level dependency
+  X-Nebula-Token (every API call does, per spec) — added as an explicit router-level dependency
   since this router is constructed with public=True to skip Endpoint's normal JWT gate. The bearer
-  credential is a ProjectAccessKey token (nebular.access_keys.resolve_access_key), not a JWT — no
+  credential is a ProjectAccessKey token (nebula.access_keys.resolve_access_key), not a JWT — no
   relation to get_current_user/get_jwt_claims at all. Key/environment are matched case-insensitively
-  by name (nebular.secrets.get_key_by_name / nebular.environments.get_environment_by_name) since a
+  by name (nebula.secrets.get_key_by_name / nebula.environments.get_environment_by_name) since a
   machine caller only ever knows the human-readable names, never internal UUIDs. Any lookup miss
   (unknown key, unknown environment, or no value set for that pair) is a 404 — never distinguished
   from each other in the response, so a caller can't enumerate a project's key names by probing.
-  Every call is audit-logged (nebular.audit.record_access_key_action, action="vault.retrieve") once
+  Every call is audit-logged (nebula.audit.record_access_key_action, action="vault.retrieve") once
   the presented access key itself resolves — success and every 404 both get a row (success=False for
   the 404s), backing the Audit Logs page's "API calls"/"Failed retrievals" tabs and the Dashboard's
   daily extraction/failed-retrieval charts. A wholly invalid/revoked access key (get_access_key's own
@@ -31,15 +31,15 @@ from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular import access_keys as access_keys_service
-from nebular import audit as audit_service
-from nebular import environments as environments_service
-from nebular import secrets as secrets_service
-from nebular.api.endpoint import Endpoint, verify_nebular_token
-from nebular.database import get_session
-from nebular.models.tables import Project, ProjectAccessKey
-from nebular.models.vault import VaultSecretResponse
-from nebular.secrets import SecretValueNotFoundError
+from nebula import access_keys as access_keys_service
+from nebula import audit as audit_service
+from nebula import environments as environments_service
+from nebula import secrets as secrets_service
+from nebula.api.endpoint import Endpoint, verify_nebula_token
+from nebula.database import get_session
+from nebula.models.tables import Project, ProjectAccessKey
+from nebula.models.vault import VaultSecretResponse
+from nebula.secrets import SecretValueNotFoundError
 
 VAULT_BEARER = HTTPBearer(auto_error=True)
 
@@ -56,11 +56,11 @@ async def get_access_key(
 
 
 class VaultRouter(Endpoint):
-    """Public router (no JWT gate) — auth is X-Nebular-Token + a project access key instead."""
+    """Public router (no JWT gate) — auth is X-Nebula-Token + a project access key instead."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(
-            public=True, dependencies=[Depends(verify_nebular_token)], *args, **kwargs
+            public=True, dependencies=[Depends(verify_nebula_token)], *args, **kwargs
         )
         self.add_api_route(
             "/secret",

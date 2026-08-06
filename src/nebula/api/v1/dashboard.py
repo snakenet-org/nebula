@@ -1,7 +1,7 @@
 #    (c) snakenet.org, All rights reserved
 """
 @ai-purpose: Dashboard summary + daily extraction/failure series — backs the frontend's home page.
-@ai-context: Both routes require only get_current_user (no admin gate — see nebular.dashboard's
+@ai-context: Both routes require only get_current_user (no admin gate — see nebula.dashboard's
   module docstring for why).
 @version: 1.0.0
 @author: Marc Fiedler <marc@snakenet.org>
@@ -11,11 +11,11 @@
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular import dashboard as dashboard_service
-from nebular.api.endpoint import Endpoint, get_current_user
-from nebular.database import get_session
-from nebular.models.dashboard import DailySeriesResponse, DashboardSummaryResponse
-from nebular.models.tables import UserAccount
+from nebula import dashboard as dashboard_service
+from nebula.api.endpoint import Endpoint, get_current_user
+from nebula.database import get_session
+from nebula.models.dashboard import DailySeriesResponse, DashboardSummaryResponse
+from nebula.models.tables import UserAccount
 
 
 class DashboardRouter(Endpoint):

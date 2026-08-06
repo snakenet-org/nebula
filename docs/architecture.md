@@ -2,19 +2,19 @@
 
 ## Overview
 
-Nebular Vault is a single FastAPI process that serves both the JSON API (`/api/v1/*`) and the built
+Nebula Vault is a single FastAPI process that serves both the JSON API (`/api/v1/*`) and the built
 Vue 3 SPA (everything else, from `public/`). It's built the same way as the sibling snakeNet.org
 services `singularity` and `satellite`: a `uv`-managed Python 3.14 backend, a Vite-built frontend
 copied into the backend's `public/` folder at image build time, and Alembic-managed PostgreSQL
 schema.
 
-The one real architectural departure from those siblings: Nebular Vault's PostgreSQL instance runs
+The one real architectural departure from those siblings: Nebula Vault's PostgreSQL instance runs
 **inside the same container**, not as a separate service. See
 [deployment.md](deployment.md#embedded-postgresql) for why and how.
 
 ```
 Browser (Vue SPA)
-   │  fetch() — X-Nebular-Token + Bearer <session JWT>
+   │  fetch() — X-Nebula-Token + Bearer <session JWT>
    ▼
 FastAPI (main.py)
    ├── /api/v1/health, /ping, /config   — public, no auth
@@ -25,24 +25,24 @@ FastAPI (main.py)
    └── /{full_path}                     — SPA static files + index.html fallback
    │
    ▼
-nebular.projects / .environments / .secrets / .access_keys / .users   (business logic)
+nebula.projects / .environments / .secrets / .access_keys / .users   (business logic)
    │
    ▼
-nebular.crypto   — encrypt_value/decrypt_value (the only code that touches plaintext)
+nebula.crypto   — encrypt_value/decrypt_value (the only code that touches plaintext)
    │
    ▼
 PostgreSQL (embedded, 127.0.0.1-only)
 ```
 
-## Backend module map (`src/nebular/`)
+## Backend module map (`src/nebula/`)
 
 | Module | Responsibility |
 |---|---|
-| `config.py` | Typed settings singleton, read from `NEBULAR_*` env vars. `require_master_key()` is the one setting with no safe default. |
+| `config.py` | Typed settings singleton, read from `NEBULA_*` env vars. `require_master_key()` is the one setting with no safe default. |
 | `database.py` | Async SQLAlchemy engine/session factory (`get_session()` FastAPI dependency), `Base` for ORM models. |
 | `security.py` | bcrypt password hashing + local HS256 session JWTs (the optional admin login). |
-| `crypto.py` | Envelope encryption for secret values — `encrypt_value`/`decrypt_value`, Fernet key derived from `NEBULAR_MASTER_KEY`. The *only* module that should ever handle plaintext outside a request handler that already decrypted one for an authorized caller. |
-| `entitlements.py` | Authentik group → entitlement mapping (`nebular-admin`/`nebular-user`), mirrors Gravity's `entitlements.py`. |
+| `crypto.py` | Envelope encryption for secret values — `encrypt_value`/`decrypt_value`, Fernet key derived from `NEBULA_MASTER_KEY`. The *only* module that should ever handle plaintext outside a request handler that already decrypted one for an authorized caller. |
+| `entitlements.py` | Authentik group → entitlement mapping (`nebula-admin`/`nebula-user`), mirrors Gravity's `entitlements.py`. |
 | `users.py` | User provisioning shared by both login paths (local admin + OIDC). |
 | `projects.py` | Project CRUD, sharing, and the full permission matrix (`can_view`/`can_edit`/`can_reveal`/`can_manage_sharing`/`can_manage_access_keys`/`can_delete`). Every other module defers to this for "may this caller do X." |
 | `environments.py` | Environment CRUD, scoped to a Project. |
@@ -50,13 +50,13 @@ PostgreSQL (embedded, 127.0.0.1-only)
 | `access_keys.py` | Project API access key generate/revoke/resolve — the credential `api/v1/vault.py` accepts. |
 | `models/tables.py` | SQLAlchemy ORM — the whole schema in one file. |
 | `models/*.py` (other) | Pydantic request/response models, one file per resource. |
-| `api/endpoint.py` | `Endpoint` base router class + the auth gates (`X-Nebular-Token`, session JWT, `get_current_user`). |
+| `api/endpoint.py` | `Endpoint` base router class + the auth gates (`X-Nebula-Token`, session JWT, `get_current_user`). |
 | `api/v1/*.py` | Thin FastAPI routers — each one delegates to its matching business-logic module rather than embedding logic itself. |
 
 ## The permission model, end to end
 
 Every Project-scoped route resolves the actor (`get_current_user`) and the target Project
-(`nebular.projects.get_visible_project`) first. That lookup itself enforces `can_view` — a Project
+(`nebula.projects.get_visible_project`) first. That lookup itself enforces `can_view` — a Project
 that exists but isn't visible to the caller 404s, the same as one that doesn't exist at all, so a
 Project id's existence can never be probed by an unrelated account.
 
@@ -70,20 +70,20 @@ business-logic module:
   secret without ever having been allowed to see the old value.
 - **`can_manage_sharing`** / **`can_manage_access_keys`** / **`can_delete`** (owner or admin only).
 
-None of this is re-derived per route by hand — every check is a bare function in `nebular.projects`
+None of this is re-derived per route by hand — every check is a bare function in `nebula.projects`
 taking already-loaded objects, so the actual authorization logic lives in exactly one place.
 
 ## The three authentication modes
 
-1. **Human session** (`Authorization: Bearer <JWT>` + `X-Nebular-Token`) — either a locally minted
+1. **Human session** (`Authorization: Bearer <JWT>` + `X-Nebula-Token`) — either a locally minted
    HS256 token (the optional admin login) or an Authentik RS256 token, told apart by the JWT
    header's `alg` (`api/endpoint.py::decode_any_token`). Used by every `/api/v1/project`,
    `/environment`, `/secret`, `/access_key` route.
 2. **Local admin login** — a special case of (1): `POST /api/v1/auth/login` mints an HS256 token for
-   the bootstrap admin account seeded from `NEBULAR_ADMIN_USER`/`_PASS` at first startup.
-3. **Project access key** (`Authorization: Bearer nbv_...` + `X-Nebular-Token`, no JWT at all) — the
+   the bootstrap admin account seeded from `NEBULA_ADMIN_USER`/`_PASS` at first startup.
+3. **Project access key** (`Authorization: Bearer nbv_...` + `X-Nebula-Token`, no JWT at all) — the
    machine-to-machine credential `GET /api/v1/vault/secret` accepts. Deliberately a separate code
-   path (`nebular.access_keys.resolve_access_key`), not a JWT variant — it identifies a *Project*,
+   path (`nebula.access_keys.resolve_access_key`), not a JWT variant — it identifies a *Project*,
    not a *user*.
 
 See [api.md](api.md) for the full route reference and [encryption.md](encryption.md) for how a

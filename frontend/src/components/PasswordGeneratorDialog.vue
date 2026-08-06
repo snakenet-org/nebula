@@ -3,7 +3,7 @@
     copy-to-clipboard.
   @ai-context: Controlled dialog (`open`/`update:open`, same pattern App.vue already uses for every
     other overlay). Two shadcn-vue Tabs: "UUID v4" regenerates on demand (PhArrowsClockwise); "Secure
-    password" has a Slider (10–25 chars, nebular.lib.generators' PASSWORD_MIN/MAX_LENGTH) that
+    password" has a Slider (10–25 chars, nebula.lib.generators' PASSWORD_MIN/MAX_LENGTH) that
     regenerates a fresh password on every step per the product ask ("with each step of the slider the
     password should randomly generate new"), plus its own explicit regenerate button. Both values are
     shown in a monospace read-only box with a Copy button (PhCopy/PhCheck swap, same 1500ms-then-

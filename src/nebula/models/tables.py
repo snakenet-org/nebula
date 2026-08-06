@@ -1,28 +1,28 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: SQLAlchemy ORM table definitions — the whole Nebular schema in one module.
+@ai-purpose: SQLAlchemy ORM table definitions — the whole Nebula schema in one module.
 @ai-context: UserAccount (local + Authentik-provisioned identities) — Project (owner_id FK, the
   creator) — ProjectShare (composite PK project_id+user_id, ShareRole VIEWER/EDITOR, both FKs CASCADE
-  — see nebular.projects for the can_view/can_edit/can_reveal permission matrix built on top of
+  — see nebula.projects for the can_view/can_edit/can_reveal permission matrix built on top of
   ownership + this table) — Environment (GLOBAL, not project-scoped — a shared taxonomy of
   environment names/descriptions any project's keys can be linked to, name unique case-insensitively
   app-wide via uq_environments_name_lower) — SecretKey (project-scoped, cleartext name, unique
   case-insensitively per project via uq_secret_keys_project_name_lower — the key/variable name a
   caller passes to api/v1/vault.py; carries its OWN `ciphertext` directly and a required
   `environment_id` — every key/value pair is linked to exactly one Environment, reassignable via
-  nebular.secrets.update_key, never many-at-once — `ciphertext` is a Fernet token from
-  nebular.crypto.encrypt_value, nullable only because a key can exist before its value is first set;
+  nebula.secrets.update_key, never many-at-once — `ciphertext` is a Fernet token from
+  nebula.crypto.encrypt_value, nullable only because a key can exist before its value is first set;
   NEVER store a plaintext value anywhere, this column and its ORM attribute are the only place a
   secret's actual content lives at rest) — ProjectAccessKey (a project-scoped API credential,
   `token_hash` SHA-256 hex + `token_prefix` for UI display — the raw token is returned to the caller
   exactly once at creation and never stored, same opaque-high-entropy-token reasoning as
-  Singularity's M2MAccount) — AuditLogEntry (append-only action log — see nebular.audit) —
+  Singularity's M2MAccount) — AuditLogEntry (append-only action log — see nebula.audit) —
   VaultMeta (single-row table, one Fernet-encrypted canary value checked at startup — see
-  nebular.crypto's module docstring and main.py's lifespan — to fail fast on a wrong
-  NEBULAR_MASTER_KEY instead of a confusing per-request 500 later).
+  nebula.crypto's module docstring and main.py's lifespan — to fail fast on a wrong
+  NEBULA_MASTER_KEY instead of a confusing per-request 500 later).
 @ai-rules:
-  - `SecretKey.ciphertext` must only ever be written via nebular.crypto.encrypt_value and read via
-    nebular.crypto.decrypt_value — never assign/return it raw.
+  - `SecretKey.ciphertext` must only ever be written via nebula.crypto.encrypt_value and read via
+    nebula.crypto.decrypt_value — never assign/return it raw.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
 @version: 3.0.0
@@ -47,7 +47,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from nebular.database import Base
+from nebula.database import Base
 
 
 class ShareRole(str, enum.Enum):
@@ -65,7 +65,7 @@ class UserAccount(Base):
     sub: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     username: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    # bcrypt hash; an OIDC-provisioned user gets an unusable sentinel (see nebular.users) so they can
+    # bcrypt hash; an OIDC-provisioned user gets an unusable sentinel (see nebula.users) so they can
     # never authenticate via the local login path.
     password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -83,9 +83,9 @@ class Project(Base):
     owner_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False
     )
-    # GitHub sync (see nebular.github_sync) — both optional, set together via
+    # GitHub sync (see nebula.github_sync) — both optional, set together via
     # github_sync.update_github_config. github_pat_ciphertext is a Fernet token
-    # (nebular.crypto.encrypt_value), same as SecretKey.ciphertext — a PAT is a credential like any
+    # (nebula.crypto.encrypt_value), same as SecretKey.ciphertext — a PAT is a credential like any
     # other secret and is NEVER returned in an API response, only a `github_connected` bool.
     github_repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     github_pat_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -158,7 +158,7 @@ class SecretKey(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
-    # Every key/value pair is linked to exactly one Environment — reassignable (nebular.secrets.
+    # Every key/value pair is linked to exactly one Environment — reassignable (nebula.secrets.
     # update_key) but never unset or multi-valued. RESTRICT (not CASCADE) so deleting a still-in-use
     # global Environment fails loudly instead of silently wiping keys across every project.
     environment_id: Mapped[uuid.UUID] = mapped_column(
@@ -169,7 +169,7 @@ class SecretKey(Base):
     variable_type: Mapped[VariableType] = mapped_column(
         String(11), default=VariableType.SECRET, nullable=False
     )
-    # A Fernet token (nebular.crypto.encrypt_value) — never a plaintext value. Nullable: a key can
+    # A Fernet token (nebula.crypto.encrypt_value) — never a plaintext value. Nullable: a key can
     # exist before its value is first set.
     ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
@@ -205,7 +205,7 @@ class ProjectAccessKey(Base):
 
 
 class VaultMeta(Base):
-    """Single-row table — a Fernet-encrypted canary checked at startup (see nebular.crypto)."""
+    """Single-row table — a Fernet-encrypted canary checked at startup (see nebula.crypto)."""
 
     __tablename__ = "vault_meta"
 
@@ -219,7 +219,7 @@ class ActorType(str, enum.Enum):
 
 
 class AuditLogEntry(Base):
-    """Append-only action log — see nebular.audit. Never edited or deleted, only inserted."""
+    """Append-only action log — see nebula.audit. Never edited or deleted, only inserted."""
 
     __tablename__ = "audit_log_entries"
 

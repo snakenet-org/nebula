@@ -1,8 +1,8 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: Nebular Vault FastAPI entry point — serves the JSON API and the built static SPA portal.
+@ai-purpose: Nebula Vault FastAPI entry point — serves the JSON API and the built static SPA portal.
 @ai-context: Boots the FastAPI app, wires CORS + a global Server header, seeds the optional local
-  bootstrap admin, checks the NEBULAR_MASTER_KEY canary (nebular.crypto/models.tables.VaultMeta —
+  bootstrap admin, checks the NEBULA_MASTER_KEY canary (nebula.crypto/models.tables.VaultMeta —
   fails startup loudly on a wrong key instead of a confusing per-request decrypt error later),
   dynamically mounts every api/v1/*.py router at /api/v1/<stem>, and serves the built Vite frontend
   from the `public/` folder with SPA-style fallback (any non-/api path resolves to a real file in
@@ -32,8 +32,8 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 
-from nebular import version
-from nebular.config import settings
+from nebula import version
+from nebula.config import settings
 
 # Replace loguru's default (unfiltered) sink with one gated by settings.log_level, before any other
 # module's import-time/startup logging can fire.
@@ -47,17 +47,17 @@ PUBLIC_DIR = Path(__file__).parent / "public"
 async def _seed_admin() -> None:
     """Create the optional local bootstrap admin from env when no local users exist (idempotent).
 
-    Uses NEBULAR_ADMIN_USER / NEBULAR_ADMIN_PASS (+ optional NEBULAR_ADMIN_EMAIL). Skipped when
+    Uses NEBULA_ADMIN_USER / NEBULA_ADMIN_PASS (+ optional NEBULA_ADMIN_EMAIL). Skipped when
     either is unset or when any user already exists, so it never clobbers a managed account.
     """
     from sqlalchemy import func, select
 
-    from nebular.database import async_session_factory
-    from nebular.models.tables import UserAccount
-    from nebular.security import hash_password
+    from nebula.database import async_session_factory
+    from nebula.models.tables import UserAccount
+    from nebula.security import hash_password
 
     if not settings.admin_user or not settings.admin_pass:
-        logger.info("No NEBULAR_ADMIN_USER/PASS set — skipping local admin seed.")
+        logger.info("No NEBULA_ADMIN_USER/PASS set — skipping local admin seed.")
         return
 
     async with async_session_factory() as session:
@@ -77,35 +77,35 @@ async def _seed_admin() -> None:
 
 
 async def _check_master_key_canary() -> None:
-    """Verify NEBULAR_MASTER_KEY against the stored VaultMeta canary (see nebular.crypto).
+    """Verify NEBULA_MASTER_KEY against the stored VaultMeta canary (see nebula.crypto).
 
     First boot: encrypts the canary plaintext and stores it. Every later boot: decrypts it and
     compares. A wrong key raises RuntimeError here — at startup, loudly — rather than surfacing as a
     confusing per-request decrypt failure on some caller's first reveal/vault call.
     """
-    from nebular.crypto import CANARY_PLAINTEXT, DecryptionError, decrypt_value, encrypt_value
-    from nebular.database import async_session_factory
-    from nebular.models.tables import VaultMeta
+    from nebula.crypto import CANARY_PLAINTEXT, DecryptionError, decrypt_value, encrypt_value
+    from nebula.database import async_session_factory
+    from nebula.models.tables import VaultMeta
 
     async with async_session_factory() as session:
         row = await session.get(VaultMeta, 1)
         if row is None:
             session.add(VaultMeta(id=1, canary_ciphertext=encrypt_value(CANARY_PLAINTEXT)))
             await session.commit()
-            logger.info("Initialized NEBULAR_MASTER_KEY canary (first boot).")
+            logger.info("Initialized NEBULA_MASTER_KEY canary (first boot).")
             return
 
         try:
             plaintext = decrypt_value(row.canary_ciphertext)
         except DecryptionError as exc:
             raise RuntimeError(
-                "NEBULAR_MASTER_KEY does not match the key used to encrypt existing data. "
+                "NEBULA_MASTER_KEY does not match the key used to encrypt existing data. "
                 "Refusing to start — see docs/encryption.md."
             ) from exc
 
         if plaintext != CANARY_PLAINTEXT:
             raise RuntimeError(
-                "NEBULAR_MASTER_KEY canary mismatch — refusing to start. See docs/encryption.md."
+                "NEBULA_MASTER_KEY canary mismatch — refusing to start. See docs/encryption.md."
             )
 
 
@@ -119,7 +119,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(
-    title="Nebular Vault API",
+    title="Nebula Vault API",
     version=version,
     description="Self-hosted secrets manager for snakeNet.org.",
     lifespan=lifespan,
@@ -135,25 +135,25 @@ app.add_middleware(
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["Authorization", "X-Nebular-Token", "Content-Type"],
+    allow_headers=["Authorization", "X-Nebula-Token", "Content-Type"],
 )
 
 
 @app.middleware("http")
 async def add_global_headers(request: Request, call_next):
-    """Stamp a Nebular Server header on every response."""
+    """Stamp a Nebula Server header on every response."""
     response = await call_next(request)
-    response.headers["Server"] = "Nebular/" + version
+    response.headers["Server"] = "Nebula/" + version
     return response
 
 
 def load_routers(api_version: str = "v1") -> None:
-    """Dynamically load and mount every router under src/nebular/api/<version>/*.py."""
-    api_dir = Path(__file__).parent / "src" / "nebular" / "api" / api_version
+    """Dynamically load and mount every router under src/nebula/api/<version>/*.py."""
+    api_dir = Path(__file__).parent / "src" / "nebula" / "api" / api_version
     for path in sorted(api_dir.glob("*.py")):
         if path.name == "__init__.py":
             continue
-        module = importlib.import_module(f"nebular.api.{api_version}.{path.stem}")
+        module = importlib.import_module(f"nebula.api.{api_version}.{path.stem}")
         if hasattr(module, "router"):
             logger.debug(f"Mounting router '{path.stem}' at /api/{api_version}/{path.stem}")
             app.include_router(
@@ -201,7 +201,7 @@ async def spa(full_path: str):
 def run() -> None:
     """Boot uvicorn using the settings singleton — shared by `__main__` and the console script."""
     logger.debug(
-        f"Starting Nebular Vault (version {version}) on {settings.host}:{settings.port} "
+        f"Starting Nebula Vault (version {version}) on {settings.host}:{settings.port} "
         f"reload={settings.dev} log_level={settings.log_level}"
     )
     uvicorn.run(

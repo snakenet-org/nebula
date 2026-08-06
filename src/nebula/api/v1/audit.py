@@ -2,7 +2,7 @@
 """
 @ai-purpose: Read-only audit log endpoints — admin only.
 @ai-context: Backs the frontend's admin-only Audit Logs page (three tabs: Activity, API calls,
-  Failed retrievals — see nebular.audit for what partitions each). Every route requires
+  Failed retrievals — see nebula.audit for what partitions each). Every route requires
   actor.is_admin; a non-admin (even a Project owner) gets 403 — the audit trail is intentionally not
   scoped per-project or per-user, so nothing short of full admin should see it.
 @version: 1.0.0
@@ -13,11 +13,11 @@
 from fastapi import Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular import audit as audit_service
-from nebular.api.endpoint import Endpoint, get_current_user
-from nebular.database import get_session
-from nebular.models.audit import AuditLogEntryResponse
-from nebular.models.tables import UserAccount
+from nebula import audit as audit_service
+from nebula.api.endpoint import Endpoint, get_current_user
+from nebula.database import get_session
+from nebula.models.audit import AuditLogEntryResponse
+from nebula.models.tables import UserAccount
 
 
 class AuditRouter(Endpoint):

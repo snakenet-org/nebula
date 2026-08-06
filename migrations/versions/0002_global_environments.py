@@ -6,7 +6,7 @@ Project, and collapses the old SecretKey/SecretValue many-to-many (one row per k
 down to a strict one-to-one: every SecretKey now carries its own `environment_id` (exactly one
 Environment, reassignable but never unset or multi-valued) and its own `ciphertext` directly,
 replacing the separate secret_values join table. Also adds SecretKey.variable_type
-(environment/secret — see nebular.models.tables.VariableType) since this migration is already
+(environment/secret — see nebula.models.tables.VariableType) since this migration is already
 restructuring the same table.
 
 This is a breaking schema change with no meaningful automatic backfill (the old model's "one key,

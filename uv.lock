@@ -388,7 +388,7 @@ wheels = [
 ]
 
 [[package]]
-name = "nebular"
+name = "nebula"
 version = "2.0.0"
 source = { editable = "." }
 dependencies = [

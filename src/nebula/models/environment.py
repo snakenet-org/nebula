@@ -3,7 +3,7 @@
 @ai-purpose: Pydantic request/response models for api/v1/environment.py.
 @ai-context: Environment is global (not project-scoped) since the 2026-08-06 redesign —
   EnvironmentResponse.secret_key_count (across every Project) is what the UI shows as a
-  delete-safety hint (nebular.environments.delete_environment 409s via EnvironmentInUseError when
+  delete-safety hint (nebula.environments.delete_environment 409s via EnvironmentInUseError when
   this is nonzero).
 @version: 2.0.0
 @author: Marc Fiedler <marc@snakenet.org>

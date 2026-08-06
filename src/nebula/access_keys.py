@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular.models.tables import Project, ProjectAccessKey
+from nebula.models.tables import Project, ProjectAccessKey
 
 # Prefix marking a bearer credential as a project access key (mirrors Singularity's `sgm_` M2M
 # prefix) — lets a caller be told apart from a human JWT at a glance if ever needed.

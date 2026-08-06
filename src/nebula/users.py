@@ -6,7 +6,7 @@
   behind both surfaces). provision_oidc_user upserts by `sub` on every login (so a later Authentik
   group change is picked up immediately — is_admin is recomputed every call, never sticky from
   first login). New OIDC users get UNUSABLE_PASSWORD so they can never authenticate via the local
-  login path. get_by_username/get_by_id are the lookups nebular.projects/secrets/access_keys use to
+  login path. get_by_username/get_by_id are the lookups nebula.projects/secrets/access_keys use to
   resolve an actor.
 @ai-rules:
   - Never return or log raw passwords.
@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular.models.tables import UserAccount
+from nebula.models.tables import UserAccount
 
 # Stored as the password of auto-provisioned OIDC users. Not a valid bcrypt hash, so
 # security.verify_password can never match it — these users can only ever sign in via OIDC.

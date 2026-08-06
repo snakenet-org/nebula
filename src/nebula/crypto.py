@@ -1,9 +1,9 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: Envelope encryption for SecretKey.ciphertext under NEBULAR_MASTER_KEY.
+@ai-purpose: Envelope encryption for SecretKey.ciphertext under NEBULA_MASTER_KEY.
 @ai-context: The ONLY module allowed to touch plaintext secret values outside a request handler that
-  just decrypted one for a caller who's allowed to see it (see nebular.secrets' can_reveal-gated
-  reveal path). NEBULAR_MASTER_KEY may be any operator-chosen string, not a pre-formatted Fernet key
+  just decrypted one for a caller who's allowed to see it (see nebula.secrets' can_reveal-gated
+  reveal path). NEBULA_MASTER_KEY may be any operator-chosen string, not a pre-formatted Fernet key
   — _derive_fernet_key() folds it through SHA-256 then base64-urlsafe-encodes the digest, since
   Fernet requires exactly 32 url-safe base64 bytes and forcing operators to pre-generate one via
   `Fernet.generate_key()` would be needless friction for "set a passphrase when you spawn the
@@ -12,7 +12,7 @@
   authenticated encryption (AES-128-CBC + HMAC-SHA256) plus a timestamp, so decrypt_value already
   detects both tampering and (implicitly) a wrong key — a wrong key doesn't decrypt to garbage
   plaintext, it raises InvalidToken, which is what makes the VaultMeta canary check in main.py's
-  startup lifespan effective at catching a misconfigured NEBULAR_MASTER_KEY early.
+  startup lifespan effective at catching a misconfigured NEBULA_MASTER_KEY early.
 @ai-rules:
   - Never log a plaintext value or the derived Fernet key.
   - encrypt_value/decrypt_value are the only sanctioned way to read/write SecretKey.ciphertext —
@@ -30,15 +30,15 @@ from functools import lru_cache
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from nebular.config import settings
+from nebula.config import settings
 
 # Re-exported so callers can catch a wrong-key/tampered-ciphertext failure without importing
 # `cryptography` themselves.
 DecryptionError = InvalidToken
 
 # The canary plaintext VaultMeta stores encrypted, checked once at startup (see main.py's lifespan)
-# to fail fast on a wrong NEBULAR_MASTER_KEY rather than surfacing as a confusing per-request error.
-CANARY_PLAINTEXT = "nebular-ok"
+# to fail fast on a wrong NEBULA_MASTER_KEY rather than surfacing as a confusing per-request error.
+CANARY_PLAINTEXT = "nebula-ok"
 
 
 def _derive_fernet_key(raw: str) -> bytes:
@@ -49,7 +49,7 @@ def _derive_fernet_key(raw: str) -> bytes:
 
 @lru_cache(maxsize=1)
 def _fernet() -> Fernet:
-    """Lazily build (and cache) the Fernet instance from NEBULAR_MASTER_KEY.
+    """Lazily build (and cache) the Fernet instance from NEBULA_MASTER_KEY.
 
     Deferred to first use rather than built at import time so importing this module never fails
     just because the env var isn't set yet (e.g. `alembic` autogenerate never encrypts anything).

@@ -18,16 +18,16 @@
 #             +++++   ++++++
 #
 #   (c) snakeNet.org, All rights reserved
-#       Nebular Vault: self-hosted secrets manager
+#       Nebula Vault: self-hosted secrets manager
 #
 # Build + push only, deliberately — unlike Satellite's own build.yml, this workflow does NOT run the
 # snakenet-org/gravity-push (deploy notification) or snakenet-org/satellite-deploy (auto-deploy)
-# steps, since Nebular Vault isn't registered anywhere yet with real secrets/push-topic-ids for
+# steps, since Nebula Vault isn't registered anywhere yet with real secrets/push-topic-ids for
 # those. Add them here, mirroring apps/satellite/.github/workflows/build.yml, once this app is
 # actually deployed somewhere.
 
-name: Build Pipeline for Nebular Vault
-run-name: ${{ github.actor }} is building Nebular Vault 🌌
+name: Build Pipeline for Nebula Vault
+run-name: ${{ github.actor }} is building Nebula Vault 🌌
 on:
   push:
     tags:
@@ -35,13 +35,13 @@ on:
       - "[0-9]+.[0-9]+.[0-9]+"
 
 jobs:
-  build-nebular:
+  build-nebula:
     runs-on: ubuntu-latest
     environment: main
     env:
       PUBLISHER: snakeNet
-      MODULE: nebular
-      NAME: Nebular Vault
+      MODULE: nebula
+      NAME: Nebula Vault
 
       REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
       REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
@@ -79,13 +79,13 @@ jobs:
               ${{ env.REGISTRY_HOST }}/${{ env.MODULE }}:latest
             labels: |
               org.opencontainers.image.title=${{ env.MODULE }}
-              org.opencontainers.image.description=Nebular Vault, a self-hosted secrets manager
+              org.opencontainers.image.description=Nebula Vault, a self-hosted secrets manager
               org.opencontainers.image.revision=${{ github.sha }}
               org.opencontainers.image.vendor=snakeNet.org
               org.opencontainers.image.url=https://snakeNet.org/
             build-args: |
               GITHUB_TOKEN=${{ env.GITHUB_TOKEN }}
 
-        # TODO: once Nebular Vault is registered in Gravity/Satellite with real secrets, add the
+        # TODO: once Nebula Vault is registered in Gravity/Satellite with real secrets, add the
         # snakenet-org/gravity-push (deploy notification) and/or snakenet-org/satellite-deploy
         # (auto-deploy) steps here, mirroring apps/satellite/.github/workflows/build.yml.

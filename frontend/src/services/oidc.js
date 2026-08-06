@@ -2,13 +2,13 @@
 // @ai-context: Built on the Web Crypto API. beginLogin() builds a PKCE challenge, stashes the
 //   verifier/state in sessionStorage and redirects to Authentik. On return to /reentry, isCallback()
 //   detects the response and completeLogin() validates state and exchanges the code for tokens. The
-//   Nebular-session handoff happens separately (composables/useAuth.js).
+//   Nebula-session handoff happens separately (composables/useAuth.js).
 // @version: 1.0.0
 // @author: Marc Fiedler <marc@snakenet.org>
 // @date: 2026-08-05
 import { OIDC } from '../config/oidc';
 
-const STORE_KEY = 'nebular.oidc';
+const STORE_KEY = 'nebula.oidc';
 
 function base64Url(bytes) {
   const arr = new Uint8Array(bytes);

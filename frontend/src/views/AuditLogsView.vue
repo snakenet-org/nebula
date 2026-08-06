@@ -1,6 +1,6 @@
 <!--
-  @ai-purpose: Admin-only Audit Logs page — every mutating action taken through Nebular.
-  @ai-context: Three tabs, mirroring nebular.audit's three query helpers: "Activity" (logged-in
+  @ai-purpose: Admin-only Audit Logs page — every mutating action taken through Nebula.
+  @ai-context: Three tabs, mirroring nebula.audit's three query helpers: "Activity" (logged-in
     humans — project/environment/secret CRUD, sharing, access keys, login/logout, reveal),
     "API calls" (Project access keys hitting GET /api/v1/vault/secret — every attempt, success or
     not), "Failed retrievals" (the success=False subset of API calls — the same rows the Dashboard's
@@ -54,7 +54,7 @@ function formatTime(iso) {
   <div class="max-w-6xl mx-auto px-4 py-8 w-full">
     <div class="mb-6">
       <h1 class="text-2xl font-bold flex items-center gap-2"><PhScroll :size="22" weight="bold" /> Audit logs</h1>
-      <p class="text-muted-foreground text-sm mt-1">Every action taken through Nebular Vault. Admin only.</p>
+      <p class="text-muted-foreground text-sm mt-1">Every action taken through Nebula Vault. Admin only.</p>
     </div>
 
     <div v-if="loading" class="space-y-3">

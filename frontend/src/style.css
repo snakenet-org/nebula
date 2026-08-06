@@ -1,6 +1,6 @@
 /*
  * @ai-purpose: Global styles — shadcn-vue theme tokens for a dark-glass yellow/light-blue nebula
- *   palette. Nebular Vault is built exclusively from shadcn-vue (https://www.shadcn-vue.com)
+ *   palette. Nebula Vault is built exclusively from shadcn-vue (https://www.shadcn-vue.com)
  *   components from this session forward — no more hand-rolled `.btn`/`.card`/`.input`/`.pill`
  *   component classes; every visual primitive comes from `src/components/ui/*` (copied in via the
  *   shadcn-vue CLI, then this file's CSS variables) or a Tailwind utility directly.

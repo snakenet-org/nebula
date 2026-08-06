@@ -6,9 +6,9 @@
 @date: 2026-08-05
 """
 
-from nebular import version
-from nebular.api.endpoint import Endpoint
-from nebular.models.health import HealthResponse
+from nebula import version
+from nebula.api.endpoint import Endpoint
+from nebula.models.health import HealthResponse
 
 
 class HealthRouter(Endpoint):

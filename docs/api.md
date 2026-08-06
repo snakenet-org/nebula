@@ -7,11 +7,11 @@ Base path for every route below: `/api/v1`. All request/response bodies are JSON
 Every route in this API — including the public ones — requires the header:
 
 ```
-X-Nebular-Token: <NEBULAR_TOKEN>
+X-Nebula-Token: <NEBULA_TOKEN>
 ```
 
 a site-wide shared secret set once when the container is spawned. It's the coarse "is this caller
-even allowed to talk to this Nebular Vault instance" gate, checked before anything else. The public
+even allowed to talk to this Nebula Vault instance" gate, checked before anything else. The public
 routes (`/health`, `/ping`, `/config`, `/auth/*`) skip every *other* gate but still require this
 header.
 
@@ -35,7 +35,7 @@ which kind they're presenting.
 
 A special case of (1) — see `POST /auth/login` below. Exists as a fallback before any Authentik
 group/user is configured, or for a fully self-hosted deployment that never wires up Authentik at
-all (`NEBULAR_OIDC_LOGIN_DISABLED=yes`, the default).
+all (`NEBULA_OIDC_LOGIN_DISABLED=yes`, the default).
 
 ### 3. Project access key (`/vault/secret` only)
 
@@ -69,7 +69,7 @@ Local username/password login (the optional admin login).
 → `AuthResponse` (see below).
 
 ### `POST /auth/oidc`
-Exchange an Authentik access token for a Nebular session.
+Exchange an Authentik access token for a Nebula session.
 ```json
 { "access_token": "...", "id_token": "..." }
 ```
@@ -78,16 +78,16 @@ Exchange an Authentik access token for a Nebular session.
 {
   "message": "Auth success",
   "token": "...",
-  "nebular_token": "...",
+  "nebula_token": "...",
   "id": "uuid",
   "name": "...",
   "email": "...",
-  "groups": ["nebular-admin"],
+  "groups": ["nebula-admin"],
   "entitlements": ["admin"],
   "is_admin": true
 }
 ```
-`nebular_token` is the `X-Nebular-Token` value the frontend must echo on every subsequent call.
+`nebula_token` is the `X-Nebula-Token` value the frontend must echo on every subsequent call.
 
 ---
 
@@ -153,7 +153,7 @@ or, to write the same value to every Environment the Project currently has:
 
 ```
 Authorization: Bearer nbv_...
-X-Nebular-Token: ...
+X-Nebula-Token: ...
 ```
 
 Case-insensitive match on both `key` and `environment`. Any lookup failure — unknown key, unknown

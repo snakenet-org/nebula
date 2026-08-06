@@ -1,6 +1,6 @@
 // @ai-purpose: Client-side parser for the Project view's "Upload .env" bulk-add flow.
 // @ai-context: Parsing happens entirely client-side, before anything is sent to the bulk-create API
-//   (nebular.secrets.create_keys_bulk) — the backend still independently re-checks for duplicate
+//   (nebula.secrets.create_keys_bulk) — the backend still independently re-checks for duplicate
 //   names, this module's only job is turning raw file text into name/value pairs. Comments (a line
 //   whose first non-whitespace character is `#`) and blank lines are stripped first, per spec —
 //   deliberately NOT stripping a trailing `# ...` after a value on the same line, since that's

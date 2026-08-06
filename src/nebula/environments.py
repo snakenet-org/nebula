@@ -2,9 +2,9 @@
 """
 @ai-purpose: Environment CRUD — GLOBAL, not scoped to any Project (see the 2026-08-06 redesign).
 @ai-context: An Environment is a shared taxonomy (e.g. "production", "staging") any Project's
-  SecretKeys can link into — exactly one Environment per key (nebular.secrets), reassignable but
+  SecretKeys can link into — exactly one Environment per key (nebula.secrets), reassignable but
   never unset. Permission checks (create/update = any authenticated user, delete = admin only) live
-  at the router layer (api/v1/environment.py), mirroring how nebular.topics-shaped modules stay thin
+  at the router layer (api/v1/environment.py), mirroring how nebula.topics-shaped modules stay thin
   behind their own gate. DuplicateEnvironmentNameError surfaces the case-insensitive unique
   constraint (uq_environments_name_lower) as a clean 409; EnvironmentInUseError surfaces the
   RESTRICT foreign key (secret_keys.environment_id) as a clean 409 instead of a raw IntegrityError
@@ -23,7 +23,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular.models.tables import Environment, SecretKey
+from nebula.models.tables import Environment, SecretKey
 
 
 class DuplicateEnvironmentNameError(Exception):

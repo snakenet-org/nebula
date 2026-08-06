@@ -14,7 +14,7 @@
     collapsed" per product ask) rather than shadcn-vue's own canned "Sidebar" block — that registry
     item fails to generate in this project's plain-JS mode (see style.css's header comment). Sits on
     the RIGHT edge of the viewport (2026-08-06: moved from the left per product ask), and the
-    collapse/expand toggle IS the Nebular Vault logo button itself (no separate `PhSidebarSimple`
+    collapse/expand toggle IS the Nebula Vault logo button itself (no separate `PhSidebarSimple`
     footer button anymore) — clicking the logo toggles `sidebarExpanded` rather than navigating (Home
     already covers "go to the project list"). About moved out of the scrollable nav list and into the
     footer, directly above Log out — the footer's fixed order is now: identity row, About, Log out.
@@ -59,7 +59,7 @@ const reentry = ref(
   window.location.pathname === '/reentry' || oidc.isCallback() || !!oidc.callbackError()
 );
 
-const RETURN_PATH_KEY = 'nebular.returnPath';
+const RETURN_PATH_KEY = 'nebula.returnPath';
 
 const transitioning = ref(false);
 const sidebarExpanded = ref(false);
@@ -171,7 +171,7 @@ onUnmounted(() => document.removeEventListener('visibilitychange', _handleVisibi
               @click="sidebarExpanded = !sidebarExpanded"
             >
               <img src="/favicon.svg" alt="" width="24" height="24" class="rounded-md shrink-0" />
-              <span v-if="sidebarExpanded" class="font-bold text-sm truncate">Nebular Vault</span>
+              <span v-if="sidebarExpanded" class="font-bold text-sm truncate">Nebula Vault</span>
             </button>
           </TooltipTrigger>
           <TooltipContent side="left">{{ sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar' }}</TooltipContent>

@@ -2,7 +2,7 @@
   @ai-purpose: OIDC redirect target (/reentry) — completes the Authentik sign-in and signs the user in.
   @ai-context: The "Sign in with snakeNet ID" flow redirects the browser back to /reentry with the
     authorization code. This view runs the token exchange (services/oidc.completeLogin) and the
-    Nebular-session handoff (useAuth.loginWithOidc) on mount, showing a spinner while it works. On
+    Nebula-session handoff (useAuth.loginWithOidc) on mount, showing a spinner while it works. On
     success App.vue swaps in the authenticated shell; on failure or a stale visit it surfaces the
     error and bails back to the login screen via the `done` event. Built from shadcn-vue Card/Button;
     the spinner is a Phosphor icon + Tailwind's `animate-spin`, no bespoke keyframes needed.
@@ -60,7 +60,7 @@ onMounted(async () => {
     <Card class="w-full max-w-sm">
       <CardContent class="px-8 text-center">
         <div class="flex items-center justify-center gap-2 text-2xl font-bold mb-5">
-          <img src="/favicon.svg" alt="" width="26" height="26" class="rounded-md" /> Nebular Vault
+          <img src="/favicon.svg" alt="" width="26" height="26" class="rounded-md" /> Nebula Vault
         </div>
 
         <template v-if="!failed">

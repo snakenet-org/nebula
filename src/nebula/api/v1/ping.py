@@ -7,8 +7,8 @@
 @date: 2026-08-05
 """
 
-from nebular.api.endpoint import Endpoint
-from nebular.models.ping import PingResponse
+from nebula.api.endpoint import Endpoint
+from nebula.models.ping import PingResponse
 
 
 class PingRouter(Endpoint):

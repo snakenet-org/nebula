@@ -1,6 +1,6 @@
-// @ai-purpose: Authenticated client for the protected Nebular API.
+// @ai-purpose: Authenticated client for the protected Nebula API.
 // @ai-context: Every protected route requires BOTH gates: Authorization: Bearer <jwt> and
-//   X-Nebular-Token: <shared secret>. Both come from the session stored by useAuth. On 401 a single
+//   X-Nebula-Token: <shared secret>. Both come from the session stored by useAuth. On 401 a single
 //   silent token-refresh is attempted (OIDC sessions only); if that succeeds the original request is
 //   retried transparently. Only when the refresh itself also fails is the caller logged out. A
 //   module-level lock (_refreshPromise) prevents concurrent refresh races when multiple in-flight
@@ -19,7 +19,7 @@ function authHeaders() {
   if (!session) throw new Error('Not authenticated.');
   const headers = { 'Content-Type': 'application/json' };
   if (session.token) headers['Authorization'] = `Bearer ${session.token}`;
-  if (session.nebularToken) headers['X-Nebular-Token'] = session.nebularToken;
+  if (session.nebulaToken) headers['X-Nebula-Token'] = session.nebulaToken;
   return headers;
 }
 
@@ -50,7 +50,7 @@ async function request(method, path, body, { authExpiryOn401 = true } = {}) {
   try {
     response = await fetch(path, fetchArgs);
   } catch {
-    throw new Error('Could not reach the Nebular API.');
+    throw new Error('Could not reach the Nebula API.');
   }
 
   if (response.status === 401 && authExpiryOn401) {
@@ -63,7 +63,7 @@ async function request(method, path, body, { authExpiryOn401 = true } = {}) {
       try {
         response = await fetch(path, { ...fetchArgs, headers: authHeaders() });
       } catch {
-        throw new Error('Could not reach the Nebular API.');
+        throw new Error('Could not reach the Nebula API.');
       }
       if (response.status !== 401) {
         return parseResponse(response);
@@ -126,8 +126,8 @@ export const revokeAccessKey = (projectId, keyId) =>
   request('DELETE', `/api/v1/access_key/${projectId}/${keyId}`);
 
 // ── Auth ─────────────────────────────────────────────────────────────────
-// Best-effort only (see App.vue's doLogout) — Nebular's JWTs are stateless, this call exists purely
-// to record an "auth.logout" nebular.audit row before the frontend discards its local session.
+// Best-effort only (see App.vue's doLogout) — Nebula's JWTs are stateless, this call exists purely
+// to record an "auth.logout" nebula.audit row before the frontend discards its local session.
 export const logout = () => request('POST', '/api/v1/auth/logout');
 
 // ── Dashboard ────────────────────────────────────────────────────────────

@@ -1,11 +1,11 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: Project CRUD + sharing — thin wrapper over nebular.projects, mirrors how Gravity's
+@ai-purpose: Project CRUD + sharing — thin wrapper over nebula.projects, mirrors how Gravity's
   api/v1/pulsar.py stays thin behind gravity.pulsars.
 @ai-context: Every route resolves the actor via get_current_user, then the target Project via
-  nebular.projects.get_visible_project (404s for both "doesn't exist" and "not visible to you", so a
+  nebula.projects.get_visible_project (404s for both "doesn't exist" and "not visible to you", so a
   Project id's existence can't be probed). Mutating routes additionally check the relevant
-  can_edit/can_manage_sharing/can_delete before calling into nebular.projects — a 403 (not 404) once
+  can_edit/can_manage_sharing/can_delete before calling into nebula.projects — a 403 (not 404) once
   the caller has already proven they can at least view the Project, so "you can see it but not edit
   it" reads as a distinct, honest error from "this doesn't exist." Share-list/manage routes are
   owner+admin only (can_manage_sharing) — a shared viewer/editor cannot see who else the Project is
@@ -24,14 +24,14 @@ import uuid
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular import audit as audit_service
-from nebular import github_sync as github_sync_service
-from nebular import projects as projects_service
-from nebular import users
-from nebular.api.endpoint import Endpoint, get_current_user
-from nebular.database import get_session
-from nebular.github_sync import GitHubAuthError, GitHubNotConfiguredError, InvalidRepoUrlError
-from nebular.models.project import (
+from nebula import audit as audit_service
+from nebula import github_sync as github_sync_service
+from nebula import projects as projects_service
+from nebula import users
+from nebula.api.endpoint import Endpoint, get_current_user
+from nebula.database import get_session
+from nebula.github_sync import GitHubAuthError, GitHubNotConfiguredError, InvalidRepoUrlError
+from nebula.models.project import (
     ProjectCreateRequest,
     ProjectGithubConfigRequest,
     ProjectGithubSyncResponse,
@@ -41,8 +41,8 @@ from nebular.models.project import (
     ProjectShareUpdateRequest,
     ProjectUpdateRequest,
 )
-from nebular.models.tables import Project, ProjectShare, ShareRole, UserAccount
-from nebular.projects import (
+from nebula.models.tables import Project, ProjectShare, ShareRole, UserAccount
+from nebula.projects import (
     DuplicateProjectShareError,
     ProjectNotFoundError,
     UnknownShareTargetError,

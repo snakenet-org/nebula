@@ -1,7 +1,7 @@
 <!--
   @ai-purpose: Home — the logged-in caller's project list + create-project form.
   @ai-context: listProjects() already scopes to what the caller may see (owned + shared, or every
-    project for an admin — see nebular.projects.list_projects) so this view does no client-side
+    project for an admin — see nebula.projects.list_projects) so this view does no client-side
     filtering. my_role badge (owner/admin/editor/viewer) is rendered straight from the API response.
     "New project" is an inline toggled form, not a modal — creating a Project is the lowest-friction
     action in the app and doesn't need an overlay. Built from shadcn-vue Card/Badge/Button/Input/

@@ -5,7 +5,7 @@
     Select) instead of the old grid-of-values-per-environment shape — so this is now a flat table
     (Key | Environment | Value | actions) with an Environment filter above it, not a grid.
     can_edit/can_reveal are derived from project.my_role (owner/admin/editor/viewer — see
-    nebular.projects' permission matrix, mirrored client-side only for showing/hiding controls; the
+    nebula.projects' permission matrix, mirrored client-side only for showing/hiding controls; the
     backend re-checks everything independently). Values are masked (`•••••••`) by default —
     revealValue() is called on demand per key and the plaintext is kept only in this component's own
     `revealed` map (never persisted, cleared on navigation since the component unmounts). Editing a

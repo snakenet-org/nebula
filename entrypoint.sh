@@ -1,30 +1,30 @@
 #!/bin/sh
 #
-#   snakeNet.org Nebular Vault Entrypoint
+#   snakeNet.org Nebula Vault Entrypoint
 #       Author: Marc Fiedler <marc@snakenet.org>
 #
 # Unlike every sibling app's entrypoint.sh, this one also owns the embedded PostgreSQL 17 instance's
-# entire lifecycle (init -> start -> stop) — see the Dockerfile's own header for why Nebular Vault
+# entire lifecycle (init -> start -> stop) — see the Dockerfile's own header for why Nebula Vault
 # bundles its own database instead of depending on an external one.
 set -e
 
 # Fail fast on the two required secrets — before touching Postgres at all, so a misconfigured
 # container never even gets as far as initializing a database it couldn't be used with anyway.
-if [ -z "$NEBULAR_MASTER_KEY" ]; then
-  echo "FATAL: NEBULAR_MASTER_KEY is not set. Refusing to start." >&2
+if [ -z "$NEBULA_MASTER_KEY" ]; then
+  echo "FATAL: NEBULA_MASTER_KEY is not set. Refusing to start." >&2
   exit 1
 fi
-if [ -z "$NEBULAR_TOKEN" ]; then
-  echo "FATAL: NEBULAR_TOKEN is not set. Refusing to start." >&2
+if [ -z "$NEBULA_TOKEN" ]; then
+  echo "FATAL: NEBULA_TOKEN is not set. Refusing to start." >&2
   exit 1
 fi
 
-NEBULAR_POSTGRES_DB="${NEBULAR_POSTGRES_DB:-nebular}"
-NEBULAR_POSTGRES_USER="${NEBULAR_POSTGRES_USER:-postgres}"
-NEBULAR_POSTGRES_PASSWORD="${NEBULAR_POSTGRES_PASSWORD:-nebular}"
-export NEBULAR_POSTGRES_HOST="${NEBULAR_POSTGRES_HOST:-localhost}"
-export NEBULAR_POSTGRES_PORT="${NEBULAR_POSTGRES_PORT:-5432}"
-export NEBULAR_POSTGRES_DB NEBULAR_POSTGRES_USER NEBULAR_POSTGRES_PASSWORD
+NEBULA_POSTGRES_DB="${NEBULA_POSTGRES_DB:-nebula}"
+NEBULA_POSTGRES_USER="${NEBULA_POSTGRES_USER:-postgres}"
+NEBULA_POSTGRES_PASSWORD="${NEBULA_POSTGRES_PASSWORD:-nebula}"
+export NEBULA_POSTGRES_HOST="${NEBULA_POSTGRES_HOST:-localhost}"
+export NEBULA_POSTGRES_PORT="${NEBULA_POSTGRES_PORT:-5432}"
+export NEBULA_POSTGRES_DB NEBULA_POSTGRES_USER NEBULA_POSTGRES_PASSWORD
 
 mkdir -p "$PGDATA"
 chown -R postgres:postgres "$PGDATA"
@@ -57,10 +57,10 @@ echo "Starting embedded PostgreSQL..."
 gosu postgres pg_ctl -D "$PGDATA" -l "$PGDATA/postgres.log" -o "-c listen_addresses=127.0.0.1" -w start
 
 if [ "$FIRST_BOOT" = "1" ]; then
-  echo "Creating the Nebular Vault role password + database..."
+  echo "Creating the Nebula Vault role password + database..."
   gosu postgres psql -v ON_ERROR_STOP=1 \
-    -c "ALTER USER \"$NEBULAR_POSTGRES_USER\" WITH PASSWORD '$NEBULAR_POSTGRES_PASSWORD';"
-  gosu postgres createdb -O "$NEBULAR_POSTGRES_USER" "$NEBULAR_POSTGRES_DB"
+    -c "ALTER USER \"$NEBULA_POSTGRES_USER\" WITH PASSWORD '$NEBULA_POSTGRES_PASSWORD';"
+  gosu postgres createdb -O "$NEBULA_POSTGRES_USER" "$NEBULA_POSTGRES_DB"
 fi
 
 # Apply any pending database migrations before the app starts. Idempotent: a DB already at head is a
@@ -76,7 +76,7 @@ uv run alembic upgrade head
 # might be running" on the next start) instead of via the trap's own `pg_ctl stop`. `wait` on a
 # background job's pid, unlike a plain foreground command, IS interruptible immediately by a
 # trapped signal, which is what lets `shutdown` actually run promptly.
-echo "Starting Nebular Vault..."
+echo "Starting Nebula Vault..."
 uv run main.py &
 APP_PID=$!
 wait "$APP_PID"

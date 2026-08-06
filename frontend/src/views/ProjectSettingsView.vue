@@ -321,7 +321,7 @@ async function deleteProject() {
           <p class="text-muted-foreground text-sm mb-4">
             Grants REST access to every secret in this project via
             <code class="font-mono">GET /api/v1/vault/secret</code>, authenticated with this key as a
-            bearer token plus the site-wide <code class="font-mono">X-Nebular-Token</code>.
+            bearer token plus the site-wide <code class="font-mono">X-Nebula-Token</code>.
           </p>
 
           <Card v-if="createdToken" class="mb-4 bg-primary/10 border-primary/30">
@@ -369,7 +369,7 @@ async function deleteProject() {
           <h2 class="font-semibold mb-3 flex items-center gap-2"><PhGithubLogo :size="18" weight="bold" /> GitHub sync</h2>
           <p class="text-muted-foreground text-sm mb-4">
             Push every key/value in this project into a GitHub repository as per-Environment secrets
-            and variables (via the <code class="font-mono">gh</code> CLI) — each Nebular Environment
+            and variables (via the <code class="font-mono">gh</code> CLI) — each Nebula Environment
             becomes a same-named GitHub Environment.
             <Badge :variant="project.github_connected ? 'success' : 'outline'" class="ml-1">
               {{ project.github_connected ? 'connected' : 'not connected' }}

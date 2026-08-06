@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🌌 Nebular Vault
+# 🌌 Nebula Vault
 
 **A self-hosted secrets manager for snakeNet.org.**
 
@@ -11,9 +11,9 @@ only you hold.
 
 ---
 
-## What is Nebular Vault?
+## What is Nebula Vault?
 
-Nebular Vault stores credentials, passwords, logins, and environment variables so your team (and
+Nebula Vault stores credentials, passwords, logins, and environment variables so your team (and
 your deploy pipelines) don't have to pass them around as plaintext files, Slack messages, or shared
 spreadsheets.
 
@@ -28,7 +28,7 @@ themselves:
   all it needs (a "copy to every environment" convenience when setting a value).
 
 Every value is encrypted at rest with a master encryption key that **you** provide when you start
-the container. Nebular Vault's own database is never a copy/paste target for that key — it's read
+the container. Nebula Vault's own database is never a copy/paste target for that key — it's read
 once from the environment and never written anywhere itself. See
 [docs/encryption.md](docs/encryption.md) for exactly how that works, and its one real limitation
 (rotating the key is destructive today).
@@ -37,9 +37,9 @@ once from the environment and never written anywhere itself. See
 
 - Sign-in is via **snakeNet ID** (Authentik SSO), same as every other snakeNet.org app, with an
   optional local admin login as a fallback (handy for first boot, before Authentik groups exist).
-- A `nebular-user` can create their own Projects and see only what they own or what's been
+- A `nebula-user` can create their own Projects and see only what they own or what's been
   explicitly **shared** with them.
-- A `nebular-admin` can see and manage every Project.
+- A `nebula-admin` can see and manage every Project.
 - Sharing a Project grants either **Viewer** (read the structure, values stay masked) or **Editor**
   (create/edit Environments, Keys, and Values) access. Only the Project's **owner or an admin** can
   ever reveal a value's plaintext, manage sharing, manage API access keys, or delete the Project —
@@ -57,14 +57,14 @@ session.
 Two things are required on every API call, mirroring the shared-secret + per-resource-credential
 pattern used across snakeNet.org's other internal services (Satellite, Gravity):
 
-1. `X-Nebular-Token` — a site-wide shared secret, set once when you spawn the container
-   (`NEBULAR_TOKEN`). Proves the caller is allowed to talk to this Nebular Vault instance at all.
+1. `X-Nebula-Token` — a site-wide shared secret, set once when you spawn the container
+   (`NEBULA_TOKEN`). Proves the caller is allowed to talk to this Nebula Vault instance at all.
 2. `Authorization: Bearer <project access key>` — proves which Project, and that the caller was
    explicitly granted access to it.
 
 ```bash
-curl "https://your-nebular-host/api/v1/vault/secret?key=DATABASE_URL&environment=production" \
-  -H "X-Nebular-Token: $NEBULAR_TOKEN" \
+curl "https://your-nebula-host/api/v1/vault/secret?key=DATABASE_URL&environment=production" \
+  -H "X-Nebula-Token: $NEBULA_TOKEN" \
   -H "Authorization: Bearer nbv_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
@@ -76,25 +76,25 @@ Full route reference: [docs/api.md](docs/api.md).
 
 ## Running it
 
-Nebular Vault ships as a **single, self-contained Docker image** — the FastAPI backend, the built
+Nebula Vault ships as a **single, self-contained Docker image** — the FastAPI backend, the built
 Vue frontend, and its own embedded PostgreSQL 17 instance all run in one container. There is no
 separate database container to stand up.
 
 ```bash
 docker run -d \
-  --name nebular \
+  --name nebula \
   -p 8000:8000 \
-  -v nebular-data:/data \
-  -e NEBULAR_MASTER_KEY="$(openssl rand -base64 32)" \
-  -e NEBULAR_TOKEN="$(openssl rand -base64 32)" \
-  -e NEBULAR_JWT_SECRET="$(openssl rand -base64 32)" \
-  -e NEBULAR_ADMIN_USER=admin \
-  -e NEBULAR_ADMIN_PASS=change-me \
-  scr.snakenet.io/nebular:latest
+  -v nebula-data:/data \
+  -e NEBULA_MASTER_KEY="$(openssl rand -base64 32)" \
+  -e NEBULA_TOKEN="$(openssl rand -base64 32)" \
+  -e NEBULA_JWT_SECRET="$(openssl rand -base64 32)" \
+  -e NEBULA_ADMIN_USER=admin \
+  -e NEBULA_ADMIN_PASS=change-me \
+  scr.snakenet.io/nebula:latest
 ```
 
-`NEBULAR_MASTER_KEY` and `NEBULAR_TOKEN` are the two variables the container refuses to start
-without — everything else has a working default. **Write down `NEBULAR_MASTER_KEY` somewhere safe.
+`NEBULA_MASTER_KEY` and `NEBULA_TOKEN` are the two variables the container refuses to start
+without — everything else has a working default. **Write down `NEBULA_MASTER_KEY` somewhere safe.
 If you lose it, every stored secret becomes permanently unrecoverable** (there's no backdoor — that's
 the point of encryption). The `/data` volume is where the embedded Postgres cluster lives; mount it
 persistently or your secrets vanish on container recreation.

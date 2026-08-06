@@ -1,10 +1,10 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: Append-only audit log — every mutating action taken through Nebular, by a human or a
+@ai-purpose: Append-only audit log — every mutating action taken through Nebula, by a human or a
   Project access key.
 @ai-context: record() is called from the ROUTER layer (api/v1/*.py), right after a mutation
   succeeds (or, for vault.py's external retrieval, after either outcome) — never from the thin
-  service modules (nebular.projects/environments/secrets/access_keys), since only the router has
+  service modules (nebula.projects/environments/secrets/access_keys), since only the router has
   both the resolved `actor` and the live `Request` (for ip_address). RULE FOR EVERY FUTURE FEATURE:
   any new mutating route must call record() too — this is not optional, per explicit product
   direction ("for all future features, always add an audit log").
@@ -17,7 +17,7 @@
     - ActorType.ACCESS_KEY — a Project access key hitting api/v1/vault.py — list_api_calls(). Rows
       with success=False here are failed retrieval attempts — list_failed_retrievals() backs both
       the Audit Logs page's own "Failed retrievals" tab and the Dashboard's failed-retrieval chart
-      (see nebular.dashboard).
+      (see nebula.dashboard).
 @ai-rules:
   - Never put a plaintext secret value in `detail` or any other column.
   - Maintain 100% type-hinting coverage.
@@ -34,7 +34,7 @@ from fastapi import Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular.models.tables import ActorType, AuditLogEntry, UserAccount
+from nebula.models.tables import ActorType, AuditLogEntry, UserAccount
 
 
 def _client_ip(request: Request | None) -> str | None:
@@ -169,7 +169,7 @@ async def list_failed_retrievals(session: AsyncSession, *, limit: int = 200) -> 
 async def daily_counts(
     session: AsyncSession, *, action: str, actor_type: ActorType, success: bool | None, days: int
 ) -> dict[date, int]:
-    """Per-day counts of `action` over the trailing `days` — backs nebular.dashboard's charts.
+    """Per-day counts of `action` over the trailing `days` — backs nebula.dashboard's charts.
 
     Returns every day in the window (zero-filled), not just days with activity, so a chart never has
     to reconstruct missing dates itself.

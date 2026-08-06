@@ -3,9 +3,9 @@
 @ai-purpose: Pydantic request/response models for api/v1/project.py.
 @ai-context: ProjectResponse.my_role tells the frontend which actions to show without it having to
   re-derive permissions client-side — "owner"/"admin" (full access), "editor" (can edit content, not
-  sharing/access-keys/delete/reveal), "viewer" (read-only, masked values only) — see nebular.projects
+  sharing/access-keys/delete/reveal), "viewer" (read-only, masked values only) — see nebula.projects
   for the actual can_view/can_edit/can_reveal/... logic this is computed from. github_connected is
-  derived (nebular.github_sync.has_github_config) — the PAT itself never appears in any response, see
+  derived (nebula.github_sync.has_github_config) — the PAT itself never appears in any response, see
   ProjectGithubConfigRequest.
 @version: 2.0.0
 @author: Marc Fiedler <marc@snakenet.org>
@@ -18,7 +18,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from nebular.models.tables import ShareRole
+from nebula.models.tables import ShareRole
 
 MyRole = Literal["owner", "admin", "editor", "viewer"]
 
@@ -50,7 +50,7 @@ class ProjectResponse(BaseModel):
 class ProjectGithubConfigRequest(BaseModel):
     repo_url: str | None = None
     # Blank/omitted leaves the currently-stored PAT untouched — see
-    # nebular.github_sync.update_github_config.
+    # nebula.github_sync.update_github_config.
     pat: str | None = None
 
 

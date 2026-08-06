@@ -9,7 +9,7 @@
 // @date: 2026-08-05
 import { reactive, readonly } from 'vue';
 
-const STORAGE_KEY = 'nebular.config';
+const STORAGE_KEY = 'nebula.config';
 const EMPTY = {
   clientId: '',
   tokenUrl: '',

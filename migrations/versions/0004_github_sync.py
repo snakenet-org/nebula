@@ -2,7 +2,7 @@
 """github sync
 
 Adds projects.github_repo_url + projects.github_pat_ciphertext (both optional, set together — see
-nebular.github_sync) backing the "Sync to GitHub" feature: pushing a Project's keys/values into a
+nebula.github_sync) backing the "Sync to GitHub" feature: pushing a Project's keys/values into a
 GitHub repository's per-Environment secrets/variables via the `gh` CLI.
 
 Revision ID: 0004_github_sync

@@ -1,6 +1,6 @@
 <!--
   @ai-purpose: Dashboard — the new home/start page. Stat cards + daily extraction/failure charts.
-  @ai-context: Counts (nebular.dashboard.summary_counts) are system-wide, not scoped to the caller's
+  @ai-context: Counts (nebula.dashboard.summary_counts) are system-wide, not scoped to the caller's
     own Projects — see that module's docstring. Three single-series charts (never one dual-axis
     chart — different metrics, different scales): API extractions (Project access keys hitting
     GET /api/v1/vault/secret successfully), frontend extractions (a logged-in human's successful
@@ -60,7 +60,7 @@ const cards = computed(() => [
   <div class="max-w-6xl mx-auto px-4 py-8 w-full">
     <div class="mb-6">
       <h1 class="text-2xl font-bold">Dashboard</h1>
-      <p class="text-muted-foreground text-sm mt-1">An overview of Nebular Vault.</p>
+      <p class="text-muted-foreground text-sm mt-1">An overview of Nebula Vault.</p>
     </div>
 
     <div v-if="loading" class="space-y-6">

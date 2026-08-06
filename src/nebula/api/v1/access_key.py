@@ -1,6 +1,6 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: ProjectAccessKey CRUD — thin wrapper over nebular.access_keys.
+@ai-purpose: ProjectAccessKey CRUD — thin wrapper over nebula.access_keys.
 @ai-context: Owner+admin only (can_manage_access_keys) for every route — an access key is a
   standing credential that can read every secret in the Project (see api/v1/vault.py), so managing
   it sits at the same trust tier as sharing/reveal/delete, not can_edit. AccessKeyCreateResponse.
@@ -15,15 +15,15 @@ import uuid
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular import access_keys as access_keys_service
-from nebular import audit as audit_service
-from nebular import projects as projects_service
-from nebular.access_keys import AccessKeyNotFoundError
-from nebular.api.endpoint import Endpoint, get_current_user
-from nebular.database import get_session
-from nebular.models.access_key import AccessKeyCreateRequest, AccessKeyCreateResponse, AccessKeyResponse
-from nebular.models.tables import UserAccount
-from nebular.projects import ProjectNotFoundError
+from nebula import access_keys as access_keys_service
+from nebula import audit as audit_service
+from nebula import projects as projects_service
+from nebula.access_keys import AccessKeyNotFoundError
+from nebula.api.endpoint import Endpoint, get_current_user
+from nebula.database import get_session
+from nebula.models.access_key import AccessKeyCreateRequest, AccessKeyCreateResponse, AccessKeyResponse
+from nebula.models.tables import UserAccount
+from nebula.projects import ProjectNotFoundError
 
 
 class AccessKeyRouter(Endpoint):

@@ -1,8 +1,8 @@
 #    (c) snakenet.org, All rights reserved
 """
 @ai-purpose: Password hashing + local session-JWT minting/decoding for the optional admin login.
-@ai-context: Nebular accepts two kinds of bearer JWT on protected routes (see api/endpoint.py): RS256
-  tokens issued by Authentik (id.snakenet.io, validated against its JWKS) and HS256 tokens Nebular
+@ai-context: Nebula accepts two kinds of bearer JWT on protected routes (see api/endpoint.py): RS256
+  tokens issued by Authentik (id.snakenet.io, validated against its JWKS) and HS256 tokens Nebula
   itself mints from local username/password login (POST /api/v1/auth/login — the "optional admin
   login" alongside Authentik). This module owns the local side: bcrypt password hashing/verification
   and HS256 access-token creation/validation, mirroring Satellite's security.py exactly.
@@ -22,10 +22,10 @@ import time
 import bcrypt
 import jwt
 
-from nebular.config import settings
+from nebula.config import settings
 
 # `iss` stamped onto locally minted tokens (lets us distinguish them in logs / future audiences).
-LOCAL_ISSUER = "nebular-local"
+LOCAL_ISSUER = "nebula-local"
 
 
 def hash_password(plain: str) -> str:
@@ -45,11 +45,11 @@ def verify_password(plain: str, hashed: str) -> bool:
 def create_access_token(subject: str, *, name: str, email: str | None, groups: list[str]) -> str:
     """Mint an HS256 access token for a locally authenticated user.
 
-    `subject` is the Nebular user id. `groups` lets local users share the same group-based
-    authorisation surface as Authentik users (see nebular.entitlements/api/endpoint.py).
+    `subject` is the Nebula user id. `groups` lets local users share the same group-based
+    authorisation surface as Authentik users (see nebula.entitlements/api/endpoint.py).
     """
     if not settings.jwt_secret:
-        raise RuntimeError("NEBULAR_JWT_SECRET is not configured")
+        raise RuntimeError("NEBULA_JWT_SECRET is not configured")
 
     now = int(time.time())
     payload = {
@@ -67,5 +67,5 @@ def create_access_token(subject: str, *, name: str, email: str | None, groups: l
 def decode_local_token(token: str) -> dict:
     """Validate a locally minted HS256 token and return its claims (raises jwt.PyJWTError)."""
     if not settings.jwt_secret:
-        raise RuntimeError("NEBULAR_JWT_SECRET is not configured")
+        raise RuntimeError("NEBULA_JWT_SECRET is not configured")
     return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"], issuer=LOCAL_ISSUER)

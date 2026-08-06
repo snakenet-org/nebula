@@ -1,7 +1,7 @@
 <!--
   @ai-purpose: Global Environments management — list/create/edit/delete the shared environment
     taxonomy (e.g. "production", "staging") every Project's secret keys link into.
-  @ai-context: Environments are GLOBAL since the 2026-08-06 redesign (nebular.environments), not
+  @ai-context: Environments are GLOBAL since the 2026-08-06 redesign (nebula.environments), not
     scoped to any one Project — list/create/update are available to any authenticated caller,
     delete is admin-only (the backend 403s a non-admin; this view also just hides the delete
     action for a non-admin, mirroring ProjectSettingsView's own client-side-hide-only convention).
