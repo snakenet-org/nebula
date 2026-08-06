@@ -1,0 +1,144 @@
+/*
+ * @ai-purpose: Global styles — shadcn-vue theme tokens for a dark-glass yellow/light-blue nebula
+ *   palette. Nebular Vault is built exclusively from shadcn-vue (https://www.shadcn-vue.com)
+ *   components from this session forward — no more hand-rolled `.btn`/`.card`/`.input`/`.pill`
+ *   component classes; every visual primitive comes from `src/components/ui/*` (copied in via the
+ *   shadcn-vue CLI, then this file's CSS variables) or a Tailwind utility directly.
+ * @ai-context: Single fixed dark palette (`<html class="dark">` in index.html, unconditionally — no
+ *   theme toggle) whose CSS variable NAMES follow shadcn-vue's own convention exactly
+ *   (--background/--foreground/--card/--popover/--primary/--secondary/--muted/--accent/
+ *   --destructive/--border/--input/--ring) so every shadcn-vue component reads them for free with
+ *   zero per-component overrides. `--card`/`--popover` are translucent (not solid) — that's what
+ *   makes the "glass" look: `src/components/ui/{card,dialog,alert-dialog,popover,dropdown-menu,
+ *   select}/*.vue` each got `backdrop-blur-xl`/`backdrop-blur-2xl` added to their root template
+ *   class string after generation (a deliberate, permanent hand-edit to the copied files — shadcn's
+ *   whole model is "it's your code now"). Palette: --primary is a light-blue filament glow (the
+ *   dominant/interactive color — buttons, links, focus rings, active states), --accent is a warm
+ *   gold/yellow glow (shadcn's structural hover/selected-state color across Button ghost/outline,
+ *   DropdownMenuItem, SelectItem, etc. — so "yellow" reads as the UI's hover/highlight color
+ *   throughout, not just a decorative accent bolted on in one spot). --success/--warning/--info are
+ *   NOT part of shadcn's own token set (it only ships --destructive) but this app genuinely needs
+ *   4 semantic states for role/status badges (owner/editor/viewer, active/revoked) — mapped into
+ *   `@theme inline` as real Tailwind colors (--color-success etc.) so `bg-success/12 text-success
+ *   border-success/28` works exactly like any built-in shadcn color, opacity modifier included.
+ *   Site-wide font is Raleway, self-hosted via @fontsource/raleway (weights 300/400/500/600/700,
+ *   imported in main.js — replaces the CLI's injected Google Fonts Geist CDN import, which violates
+ *   this repo's no-CDN policy) instead of shadcn's own default font. Nav lives in a fixed-height
+ *   left rail built from Button/Tooltip/Separator (see App.vue) — shadcn-vue's own canned "Sidebar"
+ *   block registry item fails to generate in this project's plain-JS (non-TypeScript) mode (its
+ *   template source uses a TS generic, `defineProps<SidebarProps>()`, that the CLI's JS-transform
+ *   can't strip — reproduced twice, confirmed not project-specific), so the rail is hand-composed
+ *   from primitives instead, still 100% shadcn-vue components.
+ * @version: 2.0.0
+ * @author: Marc Fiedler <marc@snakenet.org>
+ * @date: 2026-08-06
+ */
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn-vue/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: #05070c;
+  --foreground: #e9f1fb;
+  --card: rgba(13, 19, 30, 0.55);
+  --card-foreground: var(--foreground);
+  --popover: rgba(12, 17, 27, 0.92);
+  --popover-foreground: var(--foreground);
+  --primary: #6fd0ff;
+  --primary-foreground: #04141f;
+  --secondary: rgba(255, 255, 255, 0.06);
+  --secondary-foreground: var(--foreground);
+  --muted: rgba(255, 255, 255, 0.05);
+  --muted-foreground: #8fa2b8;
+  --accent: rgba(250, 204, 21, 0.14);
+  --accent-foreground: #ffe9a8;
+  --destructive: #fb7185;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --info: #7dd3fc;
+  --border: rgba(255, 255, 255, 0.09);
+  --input: rgba(255, 255, 255, 0.11);
+  --ring: rgba(111, 208, 255, 0.55);
+  --radius: 0.85rem;
+}
+
+@theme inline {
+  --font-sans: 'Raleway', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+  }
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background-image:
+    radial-gradient(ellipse 90% 55% at 20% -5%, rgba(111, 208, 255, 0.09), transparent),
+    radial-gradient(ellipse 60% 45% at 92% 92%, rgba(250, 204, 21, 0.07), transparent);
+  font-weight: 300;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Masked secret value — a row of dots, same visual language everywhere a value is hidden. */
+.secret-mask {
+  letter-spacing: 0.2em;
+  color: var(--muted-foreground);
+}
+
+/* ── Page blur-fade transition ───────────────────────────────────────────── */
+.page-content {
+  transition:
+    opacity 0.22s ease,
+    filter 0.22s ease;
+  opacity: 1;
+  filter: blur(0px);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.page-content.page-entering {
+  transition:
+    opacity 0.13s ease,
+    filter 0.13s ease;
+  opacity: 0;
+  filter: blur(10px);
+  pointer-events: none;
+}

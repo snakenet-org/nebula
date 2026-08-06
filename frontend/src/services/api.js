@@ -1,0 +1,121 @@
+// @ai-purpose: Authenticated client for the protected Nebular API.
+// @ai-context: Every protected route requires BOTH gates: Authorization: Bearer <jwt> and
+//   X-Nebular-Token: <shared secret>. Both come from the session stored by useAuth. On 401 a single
+//   silent token-refresh is attempted (OIDC sessions only); if that succeeds the original request is
+//   retried transparently. Only when the refresh itself also fails is the caller logged out. A
+//   module-level lock (_refreshPromise) prevents concurrent refresh races when multiple in-flight
+//   requests all 401 at the same time. Mirrors Satellite's services/api.js request/parseResponse
+//   shape, with thin per-route helpers for projects/environments/secrets/access keys.
+// @version: 1.0.0
+// @author: Marc Fiedler <marc@snakenet.org>
+// @date: 2026-08-05
+import { useAuth } from '../composables/useAuth';
+
+let _refreshPromise = null;
+
+function authHeaders() {
+  const { state } = useAuth();
+  const session = state.session;
+  if (!session) throw new Error('Not authenticated.');
+  const headers = { 'Content-Type': 'application/json' };
+  if (session.token) headers['Authorization'] = `Bearer ${session.token}`;
+  if (session.nebularToken) headers['X-Nebular-Token'] = session.nebularToken;
+  return headers;
+}
+
+async function parseResponse(response) {
+  let data = null;
+  try {
+    data = await response.json();
+  } catch {
+    // empty/non-JSON body
+  }
+  if (!response.ok) {
+    const detail = data?.detail;
+    let msg = typeof detail === 'string' ? detail : `Request failed (HTTP ${response.status}).`;
+    if (Array.isArray(detail) && detail.length) msg = detail.map((d) => d.msg || JSON.stringify(d)).join(', ');
+    throw new Error(msg);
+  }
+  return data;
+}
+
+async function request(method, path, body, { authExpiryOn401 = true } = {}) {
+  const fetchArgs = {
+    method,
+    headers: authHeaders(),
+    body: body === undefined ? undefined : JSON.stringify(body),
+  };
+
+  let response;
+  try {
+    response = await fetch(path, fetchArgs);
+  } catch {
+    throw new Error('Could not reach the Nebular API.');
+  }
+
+  if (response.status === 401 && authExpiryOn401) {
+    const auth = useAuth();
+    if (!_refreshPromise) {
+      _refreshPromise = auth.refreshSession().finally(() => { _refreshPromise = null; });
+    }
+    const refreshed = await _refreshPromise;
+    if (refreshed) {
+      try {
+        response = await fetch(path, { ...fetchArgs, headers: authHeaders() });
+      } catch {
+        throw new Error('Could not reach the Nebular API.');
+      }
+      if (response.status !== 401) {
+        return parseResponse(response);
+      }
+    }
+    auth.logout();
+    throw new Error('Your session has expired. Please log in again.');
+  }
+
+  return parseResponse(response);
+}
+
+// ── Projects ──────────────────────────────────────────────────────────────
+export const listProjects = () => request('GET', '/api/v1/project/');
+export const getProject = (id) => request('GET', `/api/v1/project/${id}`);
+export const createProject = (payload) => request('POST', '/api/v1/project/', payload);
+export const updateProject = (id, payload) => request('PATCH', `/api/v1/project/${id}`, payload);
+export const deleteProject = (id) => request('DELETE', `/api/v1/project/${id}`);
+
+// ── Sharing ───────────────────────────────────────────────────────────────
+export const listShares = (projectId) => request('GET', `/api/v1/project/${projectId}/shares`);
+export const createShare = (projectId, payload) =>
+  request('POST', `/api/v1/project/${projectId}/shares`, payload);
+export const updateShare = (projectId, userId, payload) =>
+  request('PATCH', `/api/v1/project/${projectId}/shares/${userId}`, payload);
+export const revokeShare = (projectId, userId) =>
+  request('DELETE', `/api/v1/project/${projectId}/shares/${userId}`);
+
+// ── Environments ─────────────────────────────────────────────────────────
+export const listEnvironments = (projectId) => request('GET', `/api/v1/environment/${projectId}`);
+export const createEnvironment = (projectId, payload) =>
+  request('POST', `/api/v1/environment/${projectId}`, payload);
+export const deleteEnvironment = (projectId, environmentId) =>
+  request('DELETE', `/api/v1/environment/${projectId}/${environmentId}`);
+
+// ── Secrets ───────────────────────────────────────────────────────────────
+export const listSecrets = (projectId) => request('GET', `/api/v1/secret/${projectId}`);
+export const createSecret = (projectId, payload) => request('POST', `/api/v1/secret/${projectId}`, payload);
+export const updateSecret = (projectId, keyId, payload) =>
+  request('PATCH', `/api/v1/secret/${projectId}/${keyId}`, payload);
+export const deleteSecret = (projectId, keyId) => request('DELETE', `/api/v1/secret/${projectId}/${keyId}`);
+export const setSecretValue = (projectId, keyId, payload) =>
+  request('PUT', `/api/v1/secret/${projectId}/${keyId}/value`, payload);
+export const revealSecretValue = (projectId, keyId, environmentId) =>
+  request('GET', `/api/v1/secret/${projectId}/${keyId}/reveal?environment_id=${environmentId}`);
+
+// ── Access keys ───────────────────────────────────────────────────────────
+export const listAccessKeys = (projectId) => request('GET', `/api/v1/access_key/${projectId}`);
+export const createAccessKey = (projectId, payload) =>
+  request('POST', `/api/v1/access_key/${projectId}`, payload);
+export const revokeAccessKey = (projectId, keyId) =>
+  request('DELETE', `/api/v1/access_key/${projectId}/${keyId}`);
+
+// ── Health ───────────────────────────────────────────────────────────────
+export const getHealth = () => request('GET', '/api/v1/health/');

@@ -1,0 +1,35 @@
+# Session memory/context — local only, never committed.
+CLAUDE.md
+
+# Environment
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.ruff_cache/
+*.egg-info/
+
+# Node / frontend build output
+frontend/node_modules/
+# Root-anchored only — NOT frontend/public/, which holds real source assets (favicon.svg, ...)
+# that Vite copies verbatim into this build output; a plain `public/` pattern would wrongly match
+# both.
+/public/
+
+# Embedded Postgres data (local dev only — production data lives on the mounted volume)
+dev-data/
+pgdata/
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Release metadata written by CI
+VERSION
+BUILD
+BUILD_DATE
+
+TODO.md

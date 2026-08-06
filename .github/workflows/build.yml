@@ -1,0 +1,91 @@
+#             ++++++++++++
+#         ++++++++      ++++++++
+#      +++++                  +++++
+#     +++         ++++++++       +++++
+#   +++         +++++++++++++      ++++
+#  +++          ++++++++++++        ++++
+#  ++          +++++                +++++
+# +++          ++++++                ++++
+# +++           ++++++               ++++
+# +++            +++++++             ++++
+# +++              ++++++            +++
+#  +++              ++++++          ++++
+#  ++++              ++++++        ++++
+#   ++++              ++++        ++++
+#     +++++         +++++      +++++
+#      +++++++++++++++++     +++++
+#        ++++++++++++++   ++++++
+#             +++++   ++++++
+#
+#   (c) snakeNet.org, All rights reserved
+#       Nebular Vault: self-hosted secrets manager
+#
+# Build + push only, deliberately — unlike Satellite's own build.yml, this workflow does NOT run the
+# snakenet-org/gravity-push (deploy notification) or snakenet-org/satellite-deploy (auto-deploy)
+# steps, since Nebular Vault isn't registered anywhere yet with real secrets/push-topic-ids for
+# those. Add them here, mirroring apps/satellite/.github/workflows/build.yml, once this app is
+# actually deployed somewhere.
+
+name: Build Pipeline for Nebular Vault
+run-name: ${{ github.actor }} is building Nebular Vault 🌌
+on:
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+-rc[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+  build-nebular:
+    runs-on: ubuntu-latest
+    environment: main
+    env:
+      PUBLISHER: snakeNet
+      MODULE: nebular
+      NAME: Nebular Vault
+
+      REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
+      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+      GITHUB_TOKEN: ${{ secrets.GIT_PAT }}
+    steps:
+        - name: Checking out code...
+          uses: actions/checkout@v5
+        - run: echo "${{ github.repository }} repository has been cloned to the runner."
+
+        - name: Login to snakeNet Container Registry
+          uses: docker/login-action@v4
+          with:
+            registry: ${{ env.REGISTRY_HOST }}
+            username: ${{ env.REGISTRY_USERNAME }}
+            password: ${{ env.REGISTRY_PASSWORD }}
+
+        - name: Set up Docker Buildx
+          uses: docker/setup-buildx-action@v3
+
+        - run: echo "Version ${{ github.ref_name }}-${{ github.sha }}"
+        - run: echo "${{ github.ref_name }}" > ./VERSION
+        - run: echo "${{ github.sha }}" > ./BUILD
+        - run: echo `date` > ./BUILD_DATE
+
+        - name: Build and push image multi arch
+          uses: docker/build-push-action@v5
+          with:
+            context: .
+            file: ./Dockerfile
+            platforms: linux/amd64,linux/arm64
+            push: true
+            tags: |
+              ${{ env.REGISTRY_HOST }}/${{ env.MODULE }}:${{ github.ref_name }}
+              ${{ env.REGISTRY_HOST }}/${{ env.MODULE }}:latest
+            labels: |
+              org.opencontainers.image.title=${{ env.MODULE }}
+              org.opencontainers.image.description=Nebular Vault, a self-hosted secrets manager
+              org.opencontainers.image.revision=${{ github.sha }}
+              org.opencontainers.image.vendor=snakeNet.org
+              org.opencontainers.image.url=https://snakeNet.org/
+            build-args: |
+              GITHUB_TOKEN=${{ env.GITHUB_TOKEN }}
+
+        # TODO: once Nebular Vault is registered in Gravity/Satellite with real secrets, add the
+        # snakenet-org/gravity-push (deploy notification) and/or snakenet-org/satellite-deploy
+        # (auto-deploy) steps here, mirroring apps/satellite/.github/workflows/build.yml.
