@@ -54,7 +54,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # the package-managed default cluster would just be dead weight baked into every image layer.
     mkdir -p /etc/postgresql-common && \
     echo "create_main_cluster = false" > /etc/postgresql-common/createcluster.conf && \
-    apt-get update && apt-get install -y --no-install-recommends postgresql-17 postgresql-client-17 && \
+    # GitHub CLI (`gh`) — nebular.github_sync shells out to it for the Project "Sync to GitHub"
+    # feature; installed from GitHub's own official apt repo, same signed-repo pattern as PGDG above.
+    install -d /etc/apt/keyrings && \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] \
+      https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+      postgresql-17 postgresql-client-17 gh && \
     rm -rf /var/lib/apt/lists/*
 
 # The embedded Postgres data directory + Nebular's own data folder live here — see entrypoint.sh and

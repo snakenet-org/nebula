@@ -22,15 +22,15 @@
   - Never return raw passwords, tokens, or secrets in API responses or logs.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, pyjwt, sqlalchemy[asyncio], loguru
-@version: 1.0.0
+@version: 1.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-05
+@date: 2026-08-06
 """
 
 import uuid
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -146,6 +146,11 @@ async def get_current_user(
     if user is None:
         raise HTTPException(status_code=401, detail="Unknown user")
     return user
+
+
+def client_ip(request: Request) -> str | None:
+    """Best-effort caller IP — used only as an nebular.audit AuditLogEntry.ip_address hint."""
+    return request.client.host if request.client else None
 
 
 # ── X-Nebular-Token (shared service secret) ──────────────────────────────────

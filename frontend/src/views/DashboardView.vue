@@ -1,0 +1,114 @@
+<!--
+  @ai-purpose: Dashboard — the new home/start page. Stat cards + daily extraction/failure charts.
+  @ai-context: Counts (nebular.dashboard.summary_counts) are system-wide, not scoped to the caller's
+    own Projects — see that module's docstring. Three single-series charts (never one dual-axis
+    chart — different metrics, different scales): API extractions (Project access keys hitting
+    GET /api/v1/vault/secret successfully), frontend extractions (a logged-in human's successful
+    secret.reveal), and failed retrievals (the same vault.py route's success=False rows — this is
+    also exactly what the Audit Logs page's "Failed retrievals" tab lists row-by-row). Every
+    authenticated user sees this page; project browsing moved to its own /projects route
+    (HomeView.vue, unchanged) now that / is the Dashboard.
+  @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, skeleton)
+  @version: 1.0.0
+  @author: Marc Fiedler <marc@snakenet.org>
+  @date: 2026-08-06
+-->
+<script setup>
+import { computed, onMounted, ref } from 'vue';
+import { PhFolders, PhKey, PhLockKey, PhStack, PhWarning } from '@phosphor-icons/vue';
+import { toast } from 'vue-sonner';
+import * as api from '../services/api';
+import { Card, CardContent } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import DailyLineChart from '../components/DailyLineChart.vue';
+
+const loading = ref(true);
+const summary = ref(null);
+const series = ref(null);
+
+async function load() {
+  loading.value = true;
+  try {
+    [summary.value, series.value] = await Promise.all([api.getDashboardSummary(), api.getDashboardSeries()]);
+  } catch (e) {
+    toast.error(e.message);
+  } finally {
+    loading.value = false;
+  }
+}
+onMounted(load);
+
+function toPoints(dict) {
+  return Object.entries(dict || {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, value]) => ({ date, value }));
+}
+
+const apiPoints = computed(() => toPoints(series.value?.api_extractions));
+const frontendPoints = computed(() => toPoints(series.value?.frontend_extractions));
+const failedPoints = computed(() => toPoints(series.value?.failed_retrievals));
+
+const cards = computed(() => [
+  { label: 'Environments', value: summary.value?.environment_count ?? 0, icon: PhStack },
+  { label: 'Projects', value: summary.value?.project_count ?? 0, icon: PhFolders },
+  { label: 'Variables', value: summary.value?.variable_count ?? 0, icon: PhKey },
+  { label: 'Secrets', value: summary.value?.secret_count ?? 0, icon: PhLockKey },
+]);
+</script>
+
+<template>
+  <div class="max-w-6xl mx-auto px-4 py-8 w-full">
+    <div class="mb-6">
+      <h1 class="text-2xl font-bold">Dashboard</h1>
+      <p class="text-muted-foreground text-sm mt-1">An overview of Nebular Vault.</p>
+    </div>
+
+    <div v-if="loading" class="space-y-6">
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Skeleton class="h-24 rounded-xl" v-for="i in 4" :key="i" />
+      </div>
+      <div class="grid lg:grid-cols-3 gap-4">
+        <Skeleton class="h-48 rounded-xl" v-for="i in 3" :key="i" />
+      </div>
+    </div>
+
+    <template v-else>
+      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <Card v-for="c in cards" :key="c.label">
+          <CardContent class="flex items-center gap-3">
+            <div class="rounded-lg bg-primary/10 text-primary p-2.5">
+              <component :is="c.icon" :size="20" weight="bold" />
+            </div>
+            <div>
+              <div class="text-2xl font-bold leading-none">{{ c.value }}</div>
+              <div class="text-muted-foreground text-xs mt-1">{{ c.label }}</div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div class="grid lg:grid-cols-3 gap-4">
+        <Card>
+          <CardContent>
+            <h2 class="font-semibold text-sm mb-3">Secrets extracted via API / day</h2>
+            <DailyLineChart :points="apiPoints" color="#6fd0ff" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <h2 class="font-semibold text-sm mb-3">Secrets extracted via frontend / day</h2>
+            <DailyLineChart :points="frontendPoints" color="#fbbf24" />
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent>
+            <h2 class="font-semibold text-sm mb-3 flex items-center gap-1.5">
+              <PhWarning :size="14" weight="bold" class="text-destructive" /> Failed retrieval attempts / day
+            </h2>
+            <DailyLineChart :points="failedPoints" color="#fb7185" />
+          </CardContent>
+        </Card>
+      </div>
+    </template>
+  </div>
+</template>

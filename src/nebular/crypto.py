@@ -19,9 +19,9 @@
     no other module should import `cryptography.fernet` directly.
   - Maintain 100% type-hinting coverage.
 @dependencies: cryptography
-@version: 1.0.0
+@version: 1.0.1
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-05
+@date: 2026-08-06
 """
 
 import base64

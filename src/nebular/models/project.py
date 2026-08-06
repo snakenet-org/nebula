@@ -4,10 +4,12 @@
 @ai-context: ProjectResponse.my_role tells the frontend which actions to show without it having to
   re-derive permissions client-side — "owner"/"admin" (full access), "editor" (can edit content, not
   sharing/access-keys/delete/reveal), "viewer" (read-only, masked values only) — see nebular.projects
-  for the actual can_view/can_edit/can_reveal/... logic this is computed from.
-@version: 1.0.0
+  for the actual can_view/can_edit/can_reveal/... logic this is computed from. github_connected is
+  derived (nebular.github_sync.has_github_config) — the PAT itself never appears in any response, see
+  ProjectGithubConfigRequest.
+@version: 2.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-05
+@date: 2026-08-06
 """
 
 import uuid
@@ -41,6 +43,22 @@ class ProjectResponse(BaseModel):
     updated_at: datetime
     my_role: MyRole
     secret_key_count: int
+    github_repo_url: str | None
+    github_connected: bool
+
+
+class ProjectGithubConfigRequest(BaseModel):
+    repo_url: str | None = None
+    # Blank/omitted leaves the currently-stored PAT untouched — see
+    # nebular.github_sync.update_github_config.
+    pat: str | None = None
+
+
+class ProjectGithubSyncResponse(BaseModel):
+    environments_synced: int
+    secrets_synced: int
+    variables_synced: int
+    failures: list[str]
 
 
 class ProjectShareCreateRequest(BaseModel):

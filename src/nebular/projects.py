@@ -20,9 +20,9 @@
     get_visible_project — never a bare `select(Project)` elsewhere in the codebase.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 1.0.0
+@version: 2.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-05
+@date: 2026-08-06
 """
 
 import uuid
@@ -67,6 +67,12 @@ def can_manage_sharing(actor: UserAccount, project: Project) -> bool:
 
 
 def can_manage_access_keys(actor: UserAccount, project: Project) -> bool:
+    return actor.is_admin or project.owner_id == actor.id
+
+
+def can_manage_github(actor: UserAccount, project: Project) -> bool:
+    """Configuring/triggering GitHub sync exposes every secret in the Project externally — same
+    owner/admin-only trust tier as reveal/sharing/access-keys/delete."""
     return actor.is_admin or project.owner_id == actor.id
 
 

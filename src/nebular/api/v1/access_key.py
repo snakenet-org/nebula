@@ -5,17 +5,18 @@
   standing credential that can read every secret in the Project (see api/v1/vault.py), so managing
   it sits at the same trust tier as sharing/reveal/delete, not can_edit. AccessKeyCreateResponse.
   token is present ONLY on the create response — list/get never return it again.
-@version: 1.0.0
+@version: 1.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-05
+@date: 2026-08-06
 """
 
 import uuid
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nebular import access_keys as access_keys_service
+from nebular import audit as audit_service
 from nebular import projects as projects_service
 from nebular.access_keys import AccessKeyNotFoundError
 from nebular.api.endpoint import Endpoint, get_current_user
@@ -64,6 +65,7 @@ class AccessKeyRouter(Endpoint):
         self,
         project_id: uuid.UUID,
         payload: AccessKeyCreateRequest,
+        request: Request,
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> AccessKeyCreateResponse:
@@ -72,6 +74,11 @@ class AccessKeyRouter(Endpoint):
             raise HTTPException(status_code=403, detail="You cannot manage this project's access keys")
         row, token = await access_keys_service.generate_access_key(
             session, project_id, name=payload.name, created_by=actor.id
+        )
+        await audit_service.record_user_action(
+            session, actor, request,
+            action="access_key.create", object_type="access_key", object_id=row.id,
+            object_label=row.name, project_id=project_id,
         )
         return AccessKeyCreateResponse(
             id=row.id,
@@ -88,6 +95,7 @@ class AccessKeyRouter(Endpoint):
         self,
         project_id: uuid.UUID,
         access_key_id: uuid.UUID,
+        request: Request,
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> None:
@@ -99,6 +107,11 @@ class AccessKeyRouter(Endpoint):
         except AccessKeyNotFoundError:
             raise HTTPException(status_code=404, detail="Access key not found")
         await access_keys_service.revoke_access_key(session, row)
+        await audit_service.record_user_action(
+            session, actor, request,
+            action="access_key.revoke", object_type="access_key", object_id=row.id,
+            object_label=row.name, project_id=project_id,
+        )
 
 
 router = AccessKeyRouter()

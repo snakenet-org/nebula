@@ -25,7 +25,7 @@
     nebular.crypto.decrypt_value — never assign/return it raw.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 2.0.0
+@version: 3.0.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-06
 """
@@ -83,6 +83,12 @@ class Project(Base):
     owner_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False
     )
+    # GitHub sync (see nebular.github_sync) — both optional, set together via
+    # github_sync.update_github_config. github_pat_ciphertext is a Fernet token
+    # (nebular.crypto.encrypt_value), same as SecretKey.ciphertext — a PAT is a credential like any
+    # other secret and is NEVER returned in an API response, only a `github_connected` bool.
+    github_repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    github_pat_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
@@ -205,3 +211,36 @@ class VaultMeta(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, default=1)
     canary_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ActorType(str, enum.Enum):
+    USER = "user"
+    ACCESS_KEY = "access_key"
+
+
+class AuditLogEntry(Base):
+    """Append-only action log — see nebular.audit. Never edited or deleted, only inserted."""
+
+    __tablename__ = "audit_log_entries"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    actor_type: Mapped[ActorType] = mapped_column(String(11), nullable=False)
+    # Loose reference (no FK) — an actor (UserAccount or ProjectAccessKey) may later be deleted, but
+    # the audit trail must survive that. actor_label is captured at write time for the same reason.
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    actor_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    action: Mapped[str] = mapped_column(String(64), nullable=False)
+    object_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    object_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    object_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # SET NULL (not CASCADE) — deleting a Project must not erase its audit history, only detach the
+    # live reference; object_label already preserves the project's name as text.
+    project_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
+    )
+    success: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)

@@ -12,13 +12,15 @@
   external retrieval route) must have already checked the caller may see plaintext (can_reveal for
   the human route, project-access-key possession for the machine route) before calling it; this
   module does not re-check that itself, since "may this actor see plaintext" is a Project-level
-  question answered by nebular.projects, not a secret-key-level one.
+  question answered by nebular.projects, not a secret-key-level one. create_keys_bulk backs the
+  Project view's "Upload .env" flow — always creates brand-new keys (never updates an existing key's
+  value), all-or-nothing in one commit.
 @ai-rules:
   - Never log a plaintext value.
   - encrypt_value/decrypt_value only — never import `cryptography` directly here.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 2.0.0
+@version: 2.1.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-06
 """
@@ -43,6 +45,21 @@ class SecretKeyNotFoundError(Exception):
 
 class SecretValueNotFoundError(Exception):
     """Raised when reveal_value is asked for a key that has no value set yet."""
+
+
+class BulkDuplicateKeyNamesError(Exception):
+    """Raised when a bulk-upload batch has a name colliding with another item in the same batch, or
+    with a key that already exists in this Project — names every conflict so the caller can show a
+    precise list rather than a generic "something conflicted"."""
+
+    def __init__(self, names: list[str]) -> None:
+        self.names = names
+        super().__init__(", ".join(names))
+
+
+class BulkCreateConflictError(Exception):
+    """Raised only when the commit itself still fails after create_keys_bulk's own pre-checks pass —
+    a concurrent write raced this one between the pre-check and the commit."""
 
 
 async def list_keys(session: AsyncSession, project_id: uuid.UUID) -> list[SecretKey]:
@@ -138,6 +155,64 @@ async def set_value(
     await session.commit()
     await session.refresh(key)
     return key
+
+
+async def create_keys_bulk(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    *,
+    environment_id: uuid.UUID,
+    variable_type: VariableType,
+    items: list[tuple[str, str]],
+    created_by: uuid.UUID,
+) -> list[SecretKey]:
+    """Create every (name, value) pair in `items` as a brand-new key, all in one commit.
+
+    All-or-nothing, per the "Upload .env" feature's spec: raises BulkDuplicateKeyNamesError (naming
+    every conflicting key) and writes nothing at all if any name collides with another item in the
+    same batch or with a key that already exists in this Project — a bulk upload never partially
+    applies, and it never updates an existing key's value (that's what the per-row value editor is
+    for).
+    """
+    seen: dict[str, str] = {}
+    within_batch_conflicts: list[str] = []
+    for name, _value in items:
+        lowered = name.lower()
+        if lowered in seen:
+            within_batch_conflicts.append(name)
+        else:
+            seen[lowered] = name
+    if within_batch_conflicts:
+        raise BulkDuplicateKeyNamesError(within_batch_conflicts)
+
+    existing = await list_keys(session, project_id)
+    existing_lower = {key.name.lower() for key in existing}
+    against_existing_conflicts = [name for name, _value in items if name.lower() in existing_lower]
+    if against_existing_conflicts:
+        raise BulkDuplicateKeyNamesError(against_existing_conflicts)
+
+    created = [
+        SecretKey(
+            project_id=project_id,
+            name=name,
+            description=None,
+            environment_id=environment_id,
+            variable_type=variable_type,
+            ciphertext=encrypt_value(value),
+            created_by=created_by,
+            updated_by=created_by,
+        )
+        for name, value in items
+    ]
+    session.add_all(created)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise BulkCreateConflictError() from exc
+    for key in created:
+        await session.refresh(key)
+    return created
 
 
 async def reveal_value(session: AsyncSession, key: SecretKey) -> str:

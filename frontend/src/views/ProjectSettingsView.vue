@@ -9,13 +9,13 @@
     AlertDialog/Input/Label/Button.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, select, badge,
     alert-dialog, input, label, button, skeleton)
-  @version: 2.0.0
+  @version: 3.0.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-06
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
-import { PhArrowLeft, PhCheck, PhCopy, PhKey, PhTrash, PhUserPlus } from '@phosphor-icons/vue';
+import { PhArrowLeft, PhArrowsClockwise, PhCheck, PhCopy, PhGithubLogo, PhKey, PhLinkBreak, PhTrash, PhUserPlus } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { Card, CardContent } from '@/components/ui/card';
@@ -163,6 +163,68 @@ async function revokeAccessKey() {
   }
 }
 
+// ── GitHub sync ───────────────────────────────────────────────────────────
+const githubForm = ref({ repo_url: '', pat: '' });
+const savingGithub = ref(false);
+watch(
+  project,
+  (p) => {
+    if (!p) return;
+    githubForm.value = { repo_url: p.github_repo_url || '', pat: '' };
+  },
+  { immediate: true }
+);
+async function saveGithubConfig() {
+  savingGithub.value = true;
+  try {
+    project.value = await api.updateProjectGithub(props.projectId, {
+      repo_url: githubForm.value.repo_url.trim() || null,
+      pat: githubForm.value.pat.trim() || null,
+    });
+    githubForm.value.pat = '';
+    toast.success('GitHub configuration saved.');
+  } catch (e) {
+    toast.error(e.message);
+  } finally {
+    savingGithub.value = false;
+  }
+}
+
+const syncing = ref(false);
+const confirmSync = ref(false);
+async function syncNow() {
+  confirmSync.value = false;
+  syncing.value = true;
+  try {
+    const result = await api.syncProjectGithub(props.projectId);
+    if (result.failures.length) {
+      toast.error(
+        `Synced ${result.secrets_synced} secret(s), ${result.variables_synced} variable(s) — ${result.failures.length} failure(s). See server logs.`
+      );
+    } else {
+      toast.success(
+        `Synced ${result.secrets_synced} secret(s) and ${result.variables_synced} variable(s) across ${result.environments_synced} environment(s).`
+      );
+    }
+  } catch (e) {
+    toast.error(e.message);
+  } finally {
+    syncing.value = false;
+  }
+}
+
+const confirmDisconnectGithub = ref(false);
+async function disconnectGithub() {
+  try {
+    project.value = await api.disconnectProjectGithub(props.projectId).then(() => api.getProject(props.projectId));
+    githubForm.value = { repo_url: '', pat: '' };
+    confirmDisconnectGithub.value = false;
+    toast.success('GitHub disconnected.');
+  } catch (e) {
+    toast.error(e.message);
+  }
+}
+
 // ── Danger zone ─────────────────────────────────────────────────────────
 const confirmDeleteProject = ref(false);
 async function deleteProject() {
@@ -170,7 +232,7 @@ async function deleteProject() {
     await api.deleteProject(props.projectId);
     confirmDeleteProject.value = false;
     toast.success('Project deleted.');
-    emit('navigate', '/');
+    emit('navigate', '/projects');
   } catch (e) {
     toast.error(e.message);
   }
@@ -302,6 +364,55 @@ async function deleteProject() {
         </CardContent>
       </Card>
 
+      <Card class="mb-6">
+        <CardContent>
+          <h2 class="font-semibold mb-3 flex items-center gap-2"><PhGithubLogo :size="18" weight="bold" /> GitHub sync</h2>
+          <p class="text-muted-foreground text-sm mb-4">
+            Push every key/value in this project into a GitHub repository as per-Environment secrets
+            and variables (via the <code class="font-mono">gh</code> CLI) — each Nebular Environment
+            becomes a same-named GitHub Environment.
+            <Badge :variant="project.github_connected ? 'success' : 'outline'" class="ml-1">
+              {{ project.github_connected ? 'connected' : 'not connected' }}
+            </Badge>
+          </p>
+
+          <form @submit.prevent="saveGithubConfig" class="grid sm:grid-cols-2 gap-3 mb-4">
+            <div class="space-y-1.5">
+              <Label for="gh-repo-url">Repository URL</Label>
+              <Input id="gh-repo-url" v-model="githubForm.repo_url" placeholder="https://github.com/owner/repo" />
+            </div>
+            <div class="space-y-1.5">
+              <Label for="gh-pat">Personal access token</Label>
+              <Input
+                id="gh-pat"
+                v-model="githubForm.pat"
+                type="password"
+                :placeholder="project.github_connected ? 'Leave blank to keep the current token' : 'ghp_…'"
+              />
+            </div>
+            <div class="sm:col-span-2 flex gap-2 justify-end">
+              <Button
+                v-if="project.github_connected"
+                type="button"
+                variant="outline"
+                @click="confirmDisconnectGithub = true"
+              >
+                <PhLinkBreak :size="16" weight="bold" /> Disconnect
+              </Button>
+              <Button type="submit" :disabled="savingGithub">Save</Button>
+              <Button
+                type="button"
+                variant="secondary"
+                :disabled="!project.github_connected || syncing"
+                @click="confirmSync = true"
+              >
+                <PhArrowsClockwise :size="16" weight="bold" /> Sync now
+              </Button>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+
       <Card class="border-destructive/30">
         <CardContent>
           <h2 class="font-semibold mb-2 text-destructive">Danger zone</h2>
@@ -339,6 +450,36 @@ async function deleteProject() {
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction variant="destructive" @click="revokeAccessKey">Revoke</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog :open="confirmSync" @update:open="(v) => !v && (confirmSync = false)">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Sync to GitHub?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Every key with a value set will be written to '{{ project?.github_repo_url }}' as a
+            per-Environment secret or variable. This overwrites any existing value of the same name
+            there.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction @click="syncNow">Sync now</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog :open="confirmDisconnectGithub" @update:open="(v) => !v && (confirmDisconnectGithub = false)">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Disconnect GitHub?</AlertDialogTitle>
+          <AlertDialogDescription>Removes the stored repository URL and access token. Nothing already synced to GitHub is affected.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" @click="disconnectGithub">Disconnect</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

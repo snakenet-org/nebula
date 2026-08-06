@@ -29,7 +29,7 @@
  *   template source uses a TS generic, `defineProps<SidebarProps>()`, that the CLI's JS-transform
  *   can't strip — reproduced twice, confirmed not project-specific), so the rail is hand-composed
  *   from primitives instead, still 100% shadcn-vue components.
- * @version: 2.0.0
+ * @version: 2.0.1
  * @author: Marc Fiedler <marc@snakenet.org>
  * @date: 2026-08-06
  */

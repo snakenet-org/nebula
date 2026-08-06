@@ -2,14 +2,15 @@
 """
 @ai-purpose: Pydantic request/response models for api/v1/secret.py.
 @ai-context: Since the 2026-08-06 global-environments redesign, a SecretKey carries exactly one
-  Environment link and its own value directly — SecretKeyResponse.is_set is PRESENCE ONLY (never
-  ciphertext or plaintext), so a project's key list is safe to send to any viewer regardless of
-  can_reveal. Revealing the value is a separate call (SecretRevealResponse), gated by can_reveal,
-  fetched on demand — see nebular.secrets. variable_type (environment/secret,
-  nebular.models.tables.VariableType) drives the frontend's default masking: a "secret" is always
-  masked until revealed, an "environment" variable renders in the clear (still encrypted at rest
-  either way — see the 2026-08-06 CLAUDE.md entry).
-@version: 2.0.0
+  Environment link and its own value directly. variable_type (environment/secret,
+  nebular.models.tables.VariableType) drives BOTH storage-independent masking rules: a "secret" key's
+  SecretKeyResponse.value is always null (is_set is presence-only) — plaintext only ever reaches the
+  frontend via the separate can_reveal-gated SecretRevealResponse, fetched on demand. An "environment"
+  key's `value` IS included directly in SecretKeyResponse (decrypted server-side in api/v1/secret.py's
+  `_to_response`) since it isn't meant to be anonymized — still encrypted at rest identically to a
+  secret (see nebular.crypto), the distinction is purely a frontend display/reveal-gating rule, not an
+  encryption one.
+@version: 3.1.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-06
 """
@@ -29,6 +30,24 @@ class SecretKeyCreateRequest(BaseModel):
     variable_type: VariableType = VariableType.SECRET
 
 
+class SecretBulkItem(BaseModel):
+    name: str
+    value: str
+
+
+class SecretBulkCreateRequest(BaseModel):
+    """Backs the Project view's "Upload .env" flow — every item is a NEW key, none are updates.
+
+    The frontend has already parsed/validated the uploaded file into name/value pairs before this
+    ever gets sent — see frontend/src/lib/envFile.js. `environment_id`/`variable_type` apply to
+    every item in the batch (there's one confirmation dialog for the whole upload, not one per key).
+    """
+
+    environment_id: uuid.UUID
+    variable_type: VariableType = VariableType.SECRET
+    items: list[SecretBulkItem]
+
+
 class SecretKeyUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -45,6 +64,9 @@ class SecretKeyResponse(BaseModel):
     environment_name: str
     variable_type: VariableType
     is_set: bool
+    # Populated only for variable_type == ENVIRONMENT (see the module docstring) — always null for a
+    # SECRET, which must go through the separate reveal endpoint instead.
+    value: str | None = None
     created_at: datetime
     updated_at: datetime
 

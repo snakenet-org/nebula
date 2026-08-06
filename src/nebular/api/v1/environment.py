@@ -13,9 +13,10 @@
 
 import uuid
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from nebular import audit as audit_service
 from nebular import environments as environments_service
 from nebular.api.endpoint import Endpoint, get_current_user
 from nebular.database import get_session
@@ -84,6 +85,7 @@ class EnvironmentRouter(Endpoint):
     async def create_environment(
         self,
         payload: EnvironmentCreateRequest,
+        request: Request,
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> EnvironmentResponse:
@@ -93,12 +95,18 @@ class EnvironmentRouter(Endpoint):
             )
         except DuplicateEnvironmentNameError:
             raise HTTPException(status_code=409, detail="An environment with this name already exists")
+        await audit_service.record_user_action(
+            session, actor, request,
+            action="environment.create", object_type="environment", object_id=row.id,
+            object_label=row.name,
+        )
         return await self._to_response(session, row)
 
     async def update_environment(
         self,
         environment_id: uuid.UUID,
         payload: EnvironmentUpdateRequest,
+        request: Request,
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> EnvironmentResponse:
@@ -109,11 +117,17 @@ class EnvironmentRouter(Endpoint):
             )
         except DuplicateEnvironmentNameError:
             raise HTTPException(status_code=409, detail="An environment with this name already exists")
+        await audit_service.record_user_action(
+            session, actor, request,
+            action="environment.update", object_type="environment", object_id=row.id,
+            object_label=row.name,
+        )
         return await self._to_response(session, row)
 
     async def delete_environment(
         self,
         environment_id: uuid.UUID,
+        request: Request,
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> None:
@@ -121,12 +135,18 @@ class EnvironmentRouter(Endpoint):
             raise HTTPException(status_code=403, detail="Only an admin may delete an environment")
         row = await self._environment_or_404(session, environment_id)
         try:
+            environment_id_copy, environment_name = row.id, row.name
             await environments_service.delete_environment(session, row)
         except EnvironmentInUseError:
             raise HTTPException(
                 status_code=409,
                 detail="This environment is still linked from at least one key and cannot be deleted",
             )
+        await audit_service.record_user_action(
+            session, actor, request,
+            action="environment.delete", object_type="environment", object_id=environment_id_copy,
+            object_label=environment_name,
+        )
 
 
 router = EnvironmentRouter()

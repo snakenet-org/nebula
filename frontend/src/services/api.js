@@ -6,9 +6,9 @@
 //   module-level lock (_refreshPromise) prevents concurrent refresh races when multiple in-flight
 //   requests all 401 at the same time. Mirrors Satellite's services/api.js request/parseResponse
 //   shape, with thin per-route helpers for projects/environments/secrets/access keys.
-// @version: 1.0.0
+// @version: 2.1.0
 // @author: Marc Fiedler <marc@snakenet.org>
-// @date: 2026-08-05
+// @date: 2026-08-06
 import { useAuth } from '../composables/useAuth';
 
 let _refreshPromise = null;
@@ -83,6 +83,11 @@ export const createProject = (payload) => request('POST', '/api/v1/project/', pa
 export const updateProject = (id, payload) => request('PATCH', `/api/v1/project/${id}`, payload);
 export const deleteProject = (id) => request('DELETE', `/api/v1/project/${id}`);
 
+// ── GitHub sync ──────────────────────────────────────────────────────────
+export const updateProjectGithub = (id, payload) => request('PATCH', `/api/v1/project/${id}/github`, payload);
+export const disconnectProjectGithub = (id) => request('DELETE', `/api/v1/project/${id}/github`);
+export const syncProjectGithub = (id) => request('POST', `/api/v1/project/${id}/github/sync`);
+
 // ── Sharing ───────────────────────────────────────────────────────────────
 export const listShares = (projectId) => request('GET', `/api/v1/project/${projectId}/shares`);
 export const createShare = (projectId, payload) =>
@@ -108,6 +113,8 @@ export const updateSecret = (projectId, keyId, payload) =>
 export const deleteSecret = (projectId, keyId) => request('DELETE', `/api/v1/secret/${projectId}/${keyId}`);
 export const setSecretValue = (projectId, keyId, payload) =>
   request('PUT', `/api/v1/secret/${projectId}/${keyId}/value`, payload);
+export const bulkCreateSecrets = (projectId, payload) =>
+  request('POST', `/api/v1/secret/${projectId}/bulk`, payload);
 export const revealSecretValue = (projectId, keyId) =>
   request('GET', `/api/v1/secret/${projectId}/${keyId}/reveal`);
 
@@ -117,6 +124,20 @@ export const createAccessKey = (projectId, payload) =>
   request('POST', `/api/v1/access_key/${projectId}`, payload);
 export const revokeAccessKey = (projectId, keyId) =>
   request('DELETE', `/api/v1/access_key/${projectId}/${keyId}`);
+
+// ── Auth ─────────────────────────────────────────────────────────────────
+// Best-effort only (see App.vue's doLogout) — Nebular's JWTs are stateless, this call exists purely
+// to record an "auth.logout" nebular.audit row before the frontend discards its local session.
+export const logout = () => request('POST', '/api/v1/auth/logout');
+
+// ── Dashboard ────────────────────────────────────────────────────────────
+export const getDashboardSummary = () => request('GET', '/api/v1/dashboard/summary');
+export const getDashboardSeries = () => request('GET', '/api/v1/dashboard/series');
+
+// ── Audit logs (admin only) ─────────────────────────────────────────────────
+export const listAuditActivity = () => request('GET', '/api/v1/audit/activity');
+export const listAuditApiCalls = () => request('GET', '/api/v1/audit/api-calls');
+export const listAuditFailedRetrievals = () => request('GET', '/api/v1/audit/failed-retrievals');
 
 // ── Health ───────────────────────────────────────────────────────────────
 export const getHealth = () => request('GET', '/api/v1/health/');

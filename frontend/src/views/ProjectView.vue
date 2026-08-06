@@ -10,18 +10,24 @@
     revealValue() is called on demand per key and the plaintext is kept only in this component's own
     `revealed` map (never persisted, cleared on navigation since the component unmounts). Editing a
     value is an inline per-row shadcn-vue Popover. Deleting a key goes through a shadcn-vue
-    AlertDialog.
+    AlertDialog. "Upload .env" bulk-adds keys from a pasted-in file: lib/envFile.js parses the raw
+    text client-side (rejecting the whole file if any non-comment/non-blank line fails to parse),
+    then a shadcn-vue Dialog lets the user pick a target Environment + variable type and review the
+    parsed key names before POSTing them all at once to /secret/{project_id}/bulk
+    (api.bulkCreateSecrets) — always creates brand-new keys, never updates an existing one; the
+    backend 409s (naming every conflict) rather than silently overwriting anything.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input, label,
-    select, table, popover, alert-dialog, skeleton)
-  @version: 3.0.0
+    select, table, popover, alert-dialog, dialog, skeleton)
+  @version: 4.1.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-06
 -->
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
-import { PhArrowLeft, PhEye, PhEyeSlash, PhGear, PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
+import { PhArrowLeft, PhEye, PhEyeSlash, PhGear, PhPencilSimple, PhPlus, PhTrash, PhUpload } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
+import { parseEnvFile } from '../lib/envFile';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -31,6 +37,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const props = defineProps({ projectId: { type: String, required: true } });
@@ -73,7 +80,7 @@ const filteredKeys = computed(() =>
 
 // ── New secret key ───────────────────────────────────────────────────────
 const showKeyForm = ref(false);
-const newKey = ref({ name: '', description: '', environment_id: '' });
+const newKey = ref({ name: '', description: '', environment_id: '', variable_type: 'secret' });
 const savingKey = ref(false);
 async function addKey() {
   if (!newKey.value.name.trim() || !newKey.value.environment_id) return;
@@ -83,14 +90,75 @@ async function addKey() {
       name: newKey.value.name.trim(),
       description: newKey.value.description.trim() || null,
       environment_id: newKey.value.environment_id,
+      variable_type: newKey.value.variable_type,
     });
     keys.value.push(key);
-    newKey.value = { name: '', description: '', environment_id: '' };
+    newKey.value = { name: '', description: '', environment_id: '', variable_type: 'secret' };
     showKeyForm.value = false;
   } catch (e) {
     toast.error(e.message);
   } finally {
     savingKey.value = false;
+  }
+}
+
+// ── Upload .env (bulk add) ───────────────────────────────────────────────
+// Parsing happens entirely client-side (lib/envFile.js); the parsed items are only sent to the
+// bulk-create API once the user reviews and confirms the dialog below. The whole file is rejected
+// if a single line can't be parsed — parseEnvFile never returns a partial result.
+const envFileInput = ref(null);
+const uploadDialogOpen = ref(false);
+const uploadItems = ref([]);
+const uploadEnvironmentId = ref('');
+const uploadVariableType = ref('secret');
+const uploadSubmitting = ref(false);
+
+function openEnvFilePicker() {
+  envFileInput.value?.click();
+}
+
+async function onEnvFileSelected(event) {
+  const file = event.target.files?.[0];
+  event.target.value = ''; // allow re-selecting the same file to retrigger 'change'
+  if (!file) return;
+
+  const text = await file.text();
+  const { items, errors } = parseEnvFile(text);
+
+  if (errors.length) {
+    const preview = errors.slice(0, 5).map((e) => `line ${e.line}: "${e.content.trim()}"`).join('; ');
+    const more = errors.length > 5 ? ` (+${errors.length - 5} more)` : '';
+    toast.error(`Could not parse ${errors.length} line(s) — upload cancelled. ${preview}${more}`);
+    return;
+  }
+  if (!items.length) {
+    toast.error('No key=value lines found in that file.');
+    return;
+  }
+
+  uploadItems.value = items;
+  uploadEnvironmentId.value = environments.value.length === 1 ? environments.value[0].id : '';
+  uploadVariableType.value = 'secret';
+  uploadDialogOpen.value = true;
+}
+
+async function confirmUpload() {
+  if (!uploadEnvironmentId.value || !uploadItems.value.length) return;
+  uploadSubmitting.value = true;
+  try {
+    const created = await api.bulkCreateSecrets(props.projectId, {
+      environment_id: uploadEnvironmentId.value,
+      variable_type: uploadVariableType.value,
+      items: uploadItems.value.map(({ name, value }) => ({ name, value })),
+    });
+    keys.value.push(...created);
+    toast.success(`Added ${created.length} variable${created.length === 1 ? '' : 's'}.`);
+    uploadDialogOpen.value = false;
+    uploadItems.value = [];
+  } catch (e) {
+    toast.error(e.message);
+  } finally {
+    uploadSubmitting.value = false;
   }
 }
 
@@ -166,7 +234,7 @@ async function saveValue() {
 
 <template>
   <div class="max-w-6xl mx-auto px-4 py-8 w-full">
-    <Button variant="link" class="px-0 mb-4 text-sm" @click="emit('navigate', '/')">
+    <Button variant="link" class="px-0 mb-4 text-sm" @click="emit('navigate', '/projects')">
       <PhArrowLeft :size="14" weight="bold" /> All projects
     </Button>
 
@@ -207,6 +275,16 @@ async function saveValue() {
               <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
             </SelectContent>
           </Select>
+          <input
+            ref="envFileInput"
+            type="file"
+            accept=".env,text/plain"
+            class="hidden"
+            @change="onEnvFileSelected"
+          />
+          <Button v-if="canEdit && environments.length" variant="outline" @click="openEnvFilePicker">
+            <PhUpload :size="16" weight="bold" /> Upload .env
+          </Button>
           <Button v-if="canEdit && environments.length" @click="showKeyForm = !showKeyForm">
             <PhPlus :size="16" weight="bold" /> New key
           </Button>
@@ -215,7 +293,7 @@ async function saveValue() {
 
       <Card v-if="showKeyForm" class="mb-4">
         <CardContent>
-          <form @submit.prevent="addKey" class="grid sm:grid-cols-3 gap-3">
+          <form @submit.prevent="addKey" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div class="space-y-1.5">
               <Label for="new-key-name">Name</Label>
               <Input id="new-key-name" v-model="newKey.name" placeholder="KEY_NAME" required class="uppercase" />
@@ -233,7 +311,17 @@ async function saveValue() {
                 </SelectContent>
               </Select>
             </div>
-            <div class="sm:col-span-3 flex gap-2 justify-end">
+            <div class="space-y-1.5">
+              <Label for="new-key-type">Type</Label>
+              <Select v-model="newKey.variable_type">
+                <SelectTrigger id="new-key-type" class="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="secret">Secret</SelectItem>
+                  <SelectItem value="environment">Environment variable</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="sm:col-span-2 lg:col-span-4 flex gap-2 justify-end">
               <Button type="button" variant="outline" @click="showKeyForm = false">Cancel</Button>
               <Button type="submit" :disabled="savingKey || !newKey.environment_id">Create</Button>
             </div>
@@ -260,7 +348,12 @@ async function saveValue() {
           <TableBody>
             <TableRow v-for="key in filteredKeys" :key="key.id">
               <TableCell class="align-top">
-                <div class="font-mono font-semibold">{{ key.name }}</div>
+                <div class="flex items-center gap-1.5">
+                  <span class="font-mono font-semibold">{{ key.name }}</span>
+                  <Badge :variant="key.variable_type === 'secret' ? 'warning' : 'info'" class="text-[0.65rem] px-1.5 py-0">
+                    {{ key.variable_type === 'secret' ? 'secret' : 'env var' }}
+                  </Badge>
+                </div>
                 <div v-if="key.description" class="text-muted-foreground text-xs mt-0.5">{{ key.description }}</div>
               </TableCell>
               <TableCell class="align-top">
@@ -279,11 +372,13 @@ async function saveValue() {
               <TableCell class="align-top">
                 <div class="flex items-center gap-2">
                   <span v-if="!key.is_set" class="text-muted-foreground text-xs">—</span>
+                  <!-- Environment variables are never anonymized — the value ships in the list response itself. -->
+                  <span v-else-if="key.variable_type === 'environment'" class="font-mono">{{ key.value }}</span>
                   <span v-else-if="revealed[key.id] !== undefined" class="font-mono">{{ revealed[key.id] }}</span>
                   <span v-else class="secret-mask">••••••••</span>
 
                   <Button
-                    v-if="canReveal && key.is_set"
+                    v-if="canReveal && key.is_set && key.variable_type === 'secret'"
                     variant="ghost"
                     size="icon-xs"
                     :title="revealed[key.id] !== undefined ? 'Hide' : 'Reveal'"
@@ -326,6 +421,55 @@ async function saveValue() {
         </Table>
       </Card>
     </template>
+
+    <Dialog :open="uploadDialogOpen" @update:open="(v) => !v && (uploadDialogOpen = false)">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add {{ uploadItems.length }} variable{{ uploadItems.length === 1 ? '' : 's' }} from file</DialogTitle>
+          <DialogDescription>
+            Review before adding — this creates {{ uploadItems.length === 1 ? 'a new key' : 'new keys' }}
+            only; it never overwrites an existing key's value.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-3">
+          <div class="grid grid-cols-2 gap-3">
+            <div class="space-y-1.5">
+              <Label for="upload-env">Environment</Label>
+              <Select v-model="uploadEnvironmentId">
+                <SelectTrigger id="upload-env" class="w-full"><SelectValue placeholder="Choose one" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="space-y-1.5">
+              <Label for="upload-type">Type</Label>
+              <Select v-model="uploadVariableType">
+                <SelectTrigger id="upload-type" class="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="secret">Secret</SelectItem>
+                  <SelectItem value="environment">Environment variable</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div class="space-y-1.5">
+            <Label>Keys found</Label>
+            <div class="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto rounded-md border p-2">
+              <Badge v-for="item in uploadItems" :key="item.name" variant="outline" class="font-mono">
+                {{ item.name }}
+              </Badge>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="uploadDialogOpen = false">Cancel</Button>
+          <Button :disabled="uploadSubmitting || !uploadEnvironmentId" @click="confirmUpload">
+            Add {{ uploadItems.length }} variable{{ uploadItems.length === 1 ? '' : 's' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <AlertDialog :open="!!confirmDeleteKey" @update:open="(v) => !v && (confirmDeleteKey = null)">
       <AlertDialogContent>
