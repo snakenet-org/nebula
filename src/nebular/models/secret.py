@@ -1,13 +1,17 @@
 #    (c) snakenet.org, All rights reserved
 """
 @ai-purpose: Pydantic request/response models for api/v1/secret.py.
-@ai-context: SecretKeyResponse.values carries per-environment PRESENCE ONLY (is_set) — never
-  ciphertext or plaintext, so a project's secret list is safe to send to any viewer regardless of
-  can_reveal. Revealing one value is a separate call (SecretRevealResponse), gated by can_reveal,
-  fetched on demand — see nebular.secrets.
-@version: 1.0.0
+@ai-context: Since the 2026-08-06 global-environments redesign, a SecretKey carries exactly one
+  Environment link and its own value directly — SecretKeyResponse.is_set is PRESENCE ONLY (never
+  ciphertext or plaintext), so a project's key list is safe to send to any viewer regardless of
+  can_reveal. Revealing the value is a separate call (SecretRevealResponse), gated by can_reveal,
+  fetched on demand — see nebular.secrets. variable_type (environment/secret,
+  nebular.models.tables.VariableType) drives the frontend's default masking: a "secret" is always
+  masked until revealed, an "environment" variable renders in the clear (still encrypted at rest
+  either way — see the 2026-08-06 CLAUDE.md entry).
+@version: 2.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-05
+@date: 2026-08-06
 """
 
 import uuid
@@ -15,22 +19,21 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from nebular.models.tables import VariableType
+
 
 class SecretKeyCreateRequest(BaseModel):
     name: str
     description: str | None = None
+    environment_id: uuid.UUID
+    variable_type: VariableType = VariableType.SECRET
 
 
 class SecretKeyUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
-
-
-class SecretValueState(BaseModel):
-    environment_id: uuid.UUID
-    environment_name: str
-    is_set: bool
-    updated_at: datetime | None
+    environment_id: uuid.UUID | None = None
+    variable_type: VariableType | None = None
 
 
 class SecretKeyResponse(BaseModel):
@@ -38,18 +41,16 @@ class SecretKeyResponse(BaseModel):
     project_id: uuid.UUID
     name: str
     description: str | None
+    environment_id: uuid.UUID
+    environment_name: str
+    variable_type: VariableType
+    is_set: bool
     created_at: datetime
     updated_at: datetime
-    values: list[SecretValueState]
 
 
 class SecretValueSetRequest(BaseModel):
     value: str
-    # When true, this value is written to every environment the project currently has (a
-    # convenience for a key like ADMIN_EMAIL that's genuinely the same across environments) —
-    # `environment_id` is ignored in that case.
-    apply_to_all_environments: bool = False
-    environment_id: uuid.UUID | None = None
 
 
 class SecretRevealResponse(BaseModel):

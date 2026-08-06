@@ -48,7 +48,7 @@ async def _to_response(
     session: AsyncSession, actor: UserAccount, project: Project, share: ProjectShare | None
 ) -> ProjectResponse:
     owner = await users.get_by_id(session, project.owner_id)
-    env_count, key_count = await projects_service.counts_for_project(session, project.id)
+    key_count = await projects_service.secret_key_count_for_project(session, project.id)
 
     if actor.is_admin:
         my_role = "admin"
@@ -68,7 +68,6 @@ async def _to_response(
         created_at=project.created_at,
         updated_at=project.updated_at,
         my_role=my_role,
-        environment_count=env_count,
         secret_key_count=key_count,
     )
 

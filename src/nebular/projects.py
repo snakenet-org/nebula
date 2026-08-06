@@ -30,7 +30,7 @@ import uuid
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from nebular.models.tables import Environment, Project, ProjectShare, SecretKey, ShareRole, UserAccount
+from nebular.models.tables import Project, ProjectShare, SecretKey, ShareRole, UserAccount
 
 
 class ProjectNotFoundError(Exception):
@@ -115,19 +115,17 @@ async def list_projects(session: AsyncSession, actor: UserAccount) -> list[Proje
     return list(result.scalars().unique().all())
 
 
-async def counts_for_project(session: AsyncSession, project_id: uuid.UUID) -> tuple[int, int]:
-    """(environment_count, secret_key_count) for a Project — used to populate ProjectResponse."""
-    env_count = (
-        await session.execute(
-            select(func.count()).select_from(Environment).where(Environment.project_id == project_id)
-        )
-    ).scalar_one()
-    key_count = (
+async def secret_key_count_for_project(session: AsyncSession, project_id: uuid.UUID) -> int:
+    """How many SecretKeys this Project has — used to populate ProjectResponse.
+
+    Environments are global (not project-scoped) since the 2026-08-06 redesign, so there is no
+    per-project environment count anymore — see nebular.environments.list_environments instead.
+    """
+    return (
         await session.execute(
             select(func.count()).select_from(SecretKey).where(SecretKey.project_id == project_id)
         )
     ).scalar_one()
-    return env_count, key_count
 
 
 # ── CRUD ──────────────────────────────────────────────────────────────────────

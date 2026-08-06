@@ -76,14 +76,14 @@ class VaultRouter(Endpoint):
         if secret_key is None:
             raise HTTPException(status_code=404, detail="Not found")
 
-        env = await environments_service.get_environment_by_name(session, project.id, environment)
-        if env is None:
+        # A key is now linked to exactly one Environment — the caller's requested environment name
+        # must match it (case-insensitively), same anti-enumeration 404 as every other lookup miss.
+        env = await environments_service.get_environment(session, secret_key.environment_id)
+        if env.name.lower() != environment.lower():
             raise HTTPException(status_code=404, detail="Not found")
 
         try:
-            value = await secrets_service.reveal_value(
-                session, secret_key_id=secret_key.id, environment_id=env.id
-            )
+            value = await secrets_service.reveal_value(session, secret_key)
         except SecretValueNotFoundError:
             raise HTTPException(status_code=404, detail="Not found")
 

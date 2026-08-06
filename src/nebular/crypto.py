@@ -1,6 +1,6 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: Envelope encryption for SecretValue.ciphertext under NEBULAR_MASTER_KEY.
+@ai-purpose: Envelope encryption for SecretKey.ciphertext under NEBULAR_MASTER_KEY.
 @ai-context: The ONLY module allowed to touch plaintext secret values outside a request handler that
   just decrypted one for a caller who's allowed to see it (see nebular.secrets' can_reveal-gated
   reveal path). NEBULAR_MASTER_KEY may be any operator-chosen string, not a pre-formatted Fernet key
@@ -15,7 +15,7 @@
   startup lifespan effective at catching a misconfigured NEBULAR_MASTER_KEY early.
 @ai-rules:
   - Never log a plaintext value or the derived Fernet key.
-  - encrypt_value/decrypt_value are the only sanctioned way to read/write SecretValue.ciphertext —
+  - encrypt_value/decrypt_value are the only sanctioned way to read/write SecretKey.ciphertext —
     no other module should import `cryptography.fernet` directly.
   - Maintain 100% type-hinting coverage.
 @dependencies: cryptography

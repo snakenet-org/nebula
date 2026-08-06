@@ -24,7 +24,7 @@
 -->
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { PhHouse, PhInfo, PhSidebarSimple, PhSignOut } from '@phosphor-icons/vue';
+import { PhHouse, PhInfo, PhStack, PhSidebarSimple, PhSignOut } from '@phosphor-icons/vue';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -37,6 +37,7 @@ import ReentryView from './views/ReentryView.vue';
 import HomeView from './views/HomeView.vue';
 import ProjectView from './views/ProjectView.vue';
 import ProjectSettingsView from './views/ProjectSettingsView.vue';
+import EnvironmentsView from './views/EnvironmentsView.vue';
 import AboutView from './views/AboutView.vue';
 
 const { state: auth, logout, refreshSession } = useAuth();
@@ -82,6 +83,7 @@ const isSettings = computed(() => !!projectMatch.value?.[2]);
 
 const currentView = computed(() => {
   if (projectId.value) return isSettings.value ? ProjectSettingsView : ProjectView;
+  if (path.value.startsWith('/environments')) return EnvironmentsView;
   if (path.value.startsWith('/about')) return AboutView;
   return HomeView;
 });
@@ -156,6 +158,30 @@ onUnmounted(() => document.removeEventListener('visibilitychange', _handleVisibi
             @click="navigate('/')"
           >
             <PhHouse :size="18" weight="bold" /> Home
+          </Button>
+
+          <Tooltip v-if="!sidebarExpanded">
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="w-full"
+                :class="path.startsWith('/environments') ? 'bg-accent text-accent-foreground' : ''"
+                @click="navigate('/environments')"
+              >
+                <PhStack :size="18" weight="bold" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Environments</TooltipContent>
+          </Tooltip>
+          <Button
+            v-else
+            variant="ghost"
+            class="w-full justify-start gap-2.5"
+            :class="path.startsWith('/environments') ? 'bg-accent text-accent-foreground' : ''"
+            @click="navigate('/environments')"
+          >
+            <PhStack :size="18" weight="bold" /> Environments
           </Button>
 
           <Tooltip v-if="!sidebarExpanded">

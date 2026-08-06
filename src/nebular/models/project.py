@@ -40,7 +40,6 @@ class ProjectResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     my_role: MyRole
-    environment_count: int
     secret_key_count: int
 
 

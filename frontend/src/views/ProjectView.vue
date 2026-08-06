@@ -1,23 +1,25 @@
 <!--
-  @ai-purpose: Project detail — environments + the secret key/value grid. The core screen of the app.
-  @ai-context: can_edit/can_reveal are derived from project.my_role (owner/admin/editor/viewer — see
+  @ai-purpose: Project detail — the secret key list. The core screen of the app.
+  @ai-context: Since the 2026-08-06 global-environments redesign, every key links to exactly ONE
+    Environment (picked from the global list at creation, reassignable via the row's Environment
+    Select) instead of the old grid-of-values-per-environment shape — so this is now a flat table
+    (Key | Environment | Value | actions) with an Environment filter above it, not a grid.
+    can_edit/can_reveal are derived from project.my_role (owner/admin/editor/viewer — see
     nebular.projects' permission matrix, mirrored client-side only for showing/hiding controls; the
     backend re-checks everything independently). Values are masked (`•••••••`) by default —
-    revealValue() is called on demand per cell and the plaintext is kept only in this component's own
+    revealValue() is called on demand per key and the plaintext is kept only in this component's own
     `revealed` map (never persisted, cleared on navigation since the component unmounts). Editing a
-    value is an inline per-cell shadcn-vue Popover (editingCell) with an "apply to all environments"
-    Checkbox — the one UI affordance for the spec's "same value everywhere" convenience
-    (nebular.secrets.set_value_for_all_environments). Deleting a key or an environment goes through
-    a shadcn-vue AlertDialog.
+    value is an inline per-row shadcn-vue Popover. Deleting a key goes through a shadcn-vue
+    AlertDialog.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input, label,
-    checkbox, table, popover, alert-dialog, skeleton)
-  @version: 2.0.0
+    select, table, popover, alert-dialog, skeleton)
+  @version: 3.0.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-06
 -->
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
-import { PhArrowLeft, PhEye, PhEyeSlash, PhGear, PhPencilSimple, PhPlus, PhTrash, PhX } from '@phosphor-icons/vue';
+import { PhArrowLeft, PhEye, PhEyeSlash, PhGear, PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { Card, CardContent } from '@/components/ui/card';
@@ -25,9 +27,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -47,7 +49,7 @@ async function loadAll() {
   try {
     const [p, envs, ks] = await Promise.all([
       api.getProject(props.projectId),
-      api.listEnvironments(props.projectId),
+      api.listEnvironments(),
       api.listSecrets(props.projectId),
     ]);
     project.value = p;
@@ -61,62 +63,47 @@ async function loadAll() {
 }
 onMounted(loadAll);
 
-function valueFor(key, environmentId) {
-  return key.values.find((v) => v.environment_id === environmentId) || null;
-}
-
-// ── New environment ─────────────────────────────────────────────────────
-const showEnvForm = ref(false);
-const newEnvName = ref('');
-const savingEnv = ref(false);
-async function addEnvironment() {
-  if (!newEnvName.value.trim()) return;
-  savingEnv.value = true;
-  try {
-    const env = await api.createEnvironment(props.projectId, { name: newEnvName.value.trim() });
-    environments.value.push(env);
-    newEnvName.value = '';
-    showEnvForm.value = false;
-    await loadAll();
-  } catch (e) {
-    toast.error(e.message);
-  } finally {
-    savingEnv.value = false;
-  }
-}
-
-const confirmDeleteEnv = ref(null);
-async function deleteEnvironment() {
-  if (!confirmDeleteEnv.value) return;
-  try {
-    await api.deleteEnvironment(props.projectId, confirmDeleteEnv.value.id);
-    confirmDeleteEnv.value = null;
-    await loadAll();
-    toast.success('Environment deleted.');
-  } catch (e) {
-    toast.error(e.message);
-  }
-}
+// ── Environment filter ──────────────────────────────────────────────────
+const filterEnvironmentId = ref('all');
+const filteredKeys = computed(() =>
+  filterEnvironmentId.value === 'all'
+    ? keys.value
+    : keys.value.filter((k) => k.environment_id === filterEnvironmentId.value)
+);
 
 // ── New secret key ───────────────────────────────────────────────────────
 const showKeyForm = ref(false);
-const newKey = ref({ name: '', description: '' });
+const newKey = ref({ name: '', description: '', environment_id: '' });
 const savingKey = ref(false);
 async function addKey() {
-  if (!newKey.value.name.trim()) return;
+  if (!newKey.value.name.trim() || !newKey.value.environment_id) return;
   savingKey.value = true;
   try {
     const key = await api.createSecret(props.projectId, {
       name: newKey.value.name.trim(),
       description: newKey.value.description.trim() || null,
+      environment_id: newKey.value.environment_id,
     });
     keys.value.push(key);
-    newKey.value = { name: '', description: '' };
+    newKey.value = { name: '', description: '', environment_id: '' };
     showKeyForm.value = false;
   } catch (e) {
     toast.error(e.message);
   } finally {
     savingKey.value = false;
+  }
+}
+
+// ── Reassign environment ─────────────────────────────────────────────────
+async function reassignEnvironment(key, environmentId) {
+  if (environmentId === key.environment_id) return;
+  try {
+    const updated = await api.updateSecret(props.projectId, key.id, { environment_id: environmentId });
+    const idx = keys.value.findIndex((k) => k.id === updated.id);
+    if (idx !== -1) keys.value[idx] = updated;
+    toast.success('Environment updated.');
+  } catch (e) {
+    toast.error(e.message);
   }
 }
 
@@ -135,50 +122,38 @@ async function deleteKey() {
 
 // ── Reveal ────────────────────────────────────────────────────────────────
 const revealed = reactive({});
-function cellKey(keyId, envId) {
-  return `${keyId}:${envId}`;
-}
-async function toggleReveal(key, environmentId) {
-  const ck = cellKey(key.id, environmentId);
-  if (revealed[ck] !== undefined) {
-    delete revealed[ck];
+async function toggleReveal(key) {
+  if (revealed[key.id] !== undefined) {
+    delete revealed[key.id];
     return;
   }
   try {
-    const res = await api.revealSecretValue(props.projectId, key.id, environmentId);
-    revealed[ck] = res.value;
+    const res = await api.revealSecretValue(props.projectId, key.id);
+    revealed[key.id] = res.value;
   } catch (e) {
     toast.error(e.message);
   }
 }
 
 // ── Set value ─────────────────────────────────────────────────────────────
-const editingCell = ref(null); // { keyId, environmentId, value, applyToAll }
+const editingKeyId = ref(null);
+const editingValue = ref('');
 const savingValue = ref(false);
-function isEditing(keyId, environmentId) {
-  return editingCell.value?.keyId === keyId && editingCell.value?.environmentId === environmentId;
-}
-function openEditor(key, environmentId) {
-  editingCell.value = { keyId: key.id, environmentId, value: '', applyToAll: false };
+function openEditor(key) {
+  editingKeyId.value = key.id;
+  editingValue.value = '';
 }
 function closeEditor() {
-  editingCell.value = null;
+  editingKeyId.value = null;
 }
 async function saveValue() {
-  if (!editingCell.value) return;
+  if (!editingKeyId.value) return;
   savingValue.value = true;
   try {
-    const updated = await api.setSecretValue(props.projectId, editingCell.value.keyId, {
-      value: editingCell.value.value,
-      apply_to_all_environments: editingCell.value.applyToAll,
-      environment_id: editingCell.value.applyToAll ? null : editingCell.value.environmentId,
-    });
+    const updated = await api.setSecretValue(props.projectId, editingKeyId.value, { value: editingValue.value });
     const idx = keys.value.findIndex((k) => k.id === updated.id);
     if (idx !== -1) keys.value[idx] = updated;
-    // Clear any cached reveal for this key so a stale plaintext never lingers on-screen.
-    Object.keys(revealed).forEach((ck) => {
-      if (ck.startsWith(`${updated.id}:`)) delete revealed[ck];
-    });
+    delete revealed[updated.id];
     closeEditor();
     toast.success('Value saved.');
   } catch (e) {
@@ -215,47 +190,32 @@ async function saveValue() {
         </Button>
       </div>
 
-      <!-- Environments -->
-      <div class="flex items-center gap-2 mb-4 flex-wrap">
-        <Badge v-for="env in environments" :key="env.id" variant="outline" class="gap-1.5 h-6 px-2.5">
-          {{ env.name }}
-          <button
-            v-if="canEdit"
-            type="button"
-            title="Delete environment"
-            class="cursor-pointer flex items-center opacity-70 hover:opacity-100"
-            @click="confirmDeleteEnv = env"
-          >
-            <PhX :size="11" weight="bold" />
-          </button>
-        </Badge>
-        <Button v-if="canEdit && !showEnvForm" variant="ghost" size="icon-sm" title="Add environment" @click="showEnvForm = true">
-          <PhPlus :size="14" weight="bold" />
-        </Button>
-        <form v-if="showEnvForm" class="flex items-center gap-2" @submit.prevent="addEnvironment">
-          <Input class="w-40 h-8" v-model="newEnvName" placeholder="e.g. production" autofocus />
-          <Button type="submit" size="sm" :disabled="savingEnv">Add</Button>
-          <Button type="button" variant="outline" size="sm" @click="showEnvForm = false">Cancel</Button>
-        </form>
-      </div>
-
       <Card v-if="!environments.length" class="mb-6">
         <CardContent class="text-muted-foreground text-sm">
-          Add an environment (e.g. "production", "staging") before creating keys.
+          No environments exist yet — create one on the Environments page before adding keys.
         </CardContent>
       </Card>
 
       <!-- Secret keys -->
-      <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <h2 class="font-semibold">Secrets</h2>
-        <Button v-if="canEdit && environments.length" @click="showKeyForm = !showKeyForm">
-          <PhPlus :size="16" weight="bold" /> New key
-        </Button>
+        <div class="flex items-center gap-2">
+          <Select v-model="filterEnvironmentId">
+            <SelectTrigger size="sm" class="w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All environments</SelectItem>
+              <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button v-if="canEdit && environments.length" @click="showKeyForm = !showKeyForm">
+            <PhPlus :size="16" weight="bold" /> New key
+          </Button>
+        </div>
       </div>
 
       <Card v-if="showKeyForm" class="mb-4">
         <CardContent>
-          <form @submit.prevent="addKey" class="grid sm:grid-cols-2 gap-3">
+          <form @submit.prevent="addKey" class="grid sm:grid-cols-3 gap-3">
             <div class="space-y-1.5">
               <Label for="new-key-name">Name</Label>
               <Input id="new-key-name" v-model="newKey.name" placeholder="KEY_NAME" required class="uppercase" />
@@ -264,16 +224,27 @@ async function saveValue() {
               <Label for="new-key-description">Description</Label>
               <Input id="new-key-description" v-model="newKey.description" placeholder="Description (optional)" />
             </div>
-            <div class="sm:col-span-2 flex gap-2 justify-end">
+            <div class="space-y-1.5">
+              <Label for="new-key-env">Environment</Label>
+              <Select v-model="newKey.environment_id">
+                <SelectTrigger id="new-key-env" class="w-full"><SelectValue placeholder="Choose one" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="sm:col-span-3 flex gap-2 justify-end">
               <Button type="button" variant="outline" @click="showKeyForm = false">Cancel</Button>
-              <Button type="submit" :disabled="savingKey">Create</Button>
+              <Button type="submit" :disabled="savingKey || !newKey.environment_id">Create</Button>
             </div>
           </form>
         </CardContent>
       </Card>
 
-      <Card v-if="!keys.length">
-        <CardContent class="p-10 text-center text-muted-foreground text-sm">No keys yet.</CardContent>
+      <Card v-if="!filteredKeys.length">
+        <CardContent class="p-10 text-center text-muted-foreground text-sm">
+          {{ keys.length ? 'No keys in this environment.' : 'No keys yet.' }}
+        </CardContent>
       </Card>
 
       <Card v-else class="py-0">
@@ -281,51 +252,61 @@ async function saveValue() {
           <TableHeader>
             <TableRow>
               <TableHead>Key</TableHead>
-              <TableHead v-for="env in environments" :key="env.id">{{ env.name }}</TableHead>
+              <TableHead>Environment</TableHead>
+              <TableHead>Value</TableHead>
               <TableHead class="w-10"></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            <TableRow v-for="key in keys" :key="key.id">
+            <TableRow v-for="key in filteredKeys" :key="key.id">
               <TableCell class="align-top">
                 <div class="font-mono font-semibold">{{ key.name }}</div>
                 <div v-if="key.description" class="text-muted-foreground text-xs mt-0.5">{{ key.description }}</div>
               </TableCell>
-              <TableCell v-for="env in environments" :key="env.id" class="align-top">
+              <TableCell class="align-top">
+                <Select
+                  v-if="canEdit"
+                  :model-value="key.environment_id"
+                  @update:model-value="(v) => reassignEnvironment(key, v)"
+                >
+                  <SelectTrigger size="sm" class="w-32"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Badge v-else variant="outline">{{ key.environment_name }}</Badge>
+              </TableCell>
+              <TableCell class="align-top">
                 <div class="flex items-center gap-2">
-                  <span v-if="!valueFor(key, env.id)?.is_set" class="text-muted-foreground text-xs">—</span>
-                  <span v-else-if="revealed[cellKey(key.id, env.id)] !== undefined" class="font-mono">{{ revealed[cellKey(key.id, env.id)] }}</span>
+                  <span v-if="!key.is_set" class="text-muted-foreground text-xs">—</span>
+                  <span v-else-if="revealed[key.id] !== undefined" class="font-mono">{{ revealed[key.id] }}</span>
                   <span v-else class="secret-mask">••••••••</span>
 
                   <Button
-                    v-if="canReveal && valueFor(key, env.id)?.is_set"
+                    v-if="canReveal && key.is_set"
                     variant="ghost"
                     size="icon-xs"
-                    :title="revealed[cellKey(key.id, env.id)] !== undefined ? 'Hide' : 'Reveal'"
-                    @click="toggleReveal(key, env.id)"
+                    :title="revealed[key.id] !== undefined ? 'Hide' : 'Reveal'"
+                    @click="toggleReveal(key)"
                   >
-                    <PhEyeSlash v-if="revealed[cellKey(key.id, env.id)] !== undefined" :size="13" weight="bold" />
+                    <PhEyeSlash v-if="revealed[key.id] !== undefined" :size="13" weight="bold" />
                     <PhEye v-else :size="13" weight="bold" />
                   </Button>
 
                   <Popover
                     v-if="canEdit"
-                    :open="isEditing(key.id, env.id)"
+                    :open="editingKeyId === key.id"
                     @update:open="(v) => !v && closeEditor()"
                   >
                     <PopoverTrigger as-child>
-                      <Button variant="ghost" size="icon-xs" title="Set value" @click="openEditor(key, env.id)">
+                      <Button variant="ghost" size="icon-xs" title="Set value" @click="openEditor(key)">
                         <PhPencilSimple :size="13" weight="bold" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent v-if="editingCell" class="w-64" @keyup.enter="saveValue">
+                    <PopoverContent v-if="editingKeyId === key.id" class="w-64" @keyup.enter="saveValue">
                       <div class="space-y-2.5">
-                        <Label :for="`value-${key.id}-${env.id}`">Value for {{ env.name }}</Label>
-                        <Input :id="`value-${key.id}-${env.id}`" v-model="editingCell.value" placeholder="value" autofocus />
-                        <label class="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
-                          <Checkbox v-model="editingCell.applyToAll" />
-                          apply to all environments
-                        </label>
+                        <Label :for="`value-${key.id}`">Value for {{ key.environment_name }}</Label>
+                        <Input :id="`value-${key.id}`" v-model="editingValue" placeholder="value" autofocus />
                         <div class="flex gap-2 justify-end">
                           <Button variant="outline" size="sm" @click="closeEditor">Cancel</Button>
                           <Button size="sm" :disabled="savingValue" @click="saveValue">Save</Button>
@@ -351,27 +332,12 @@ async function saveValue() {
         <AlertDialogHeader>
           <AlertDialogTitle>Delete this key?</AlertDialogTitle>
           <AlertDialogDescription>
-            This permanently removes '{{ confirmDeleteKey?.name }}' and every environment's value for it. This cannot be undone.
+            This permanently removes '{{ confirmDeleteKey?.name }}' and its value. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction variant="destructive" @click="deleteKey">Delete</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-
-    <AlertDialog :open="!!confirmDeleteEnv" @update:open="(v) => !v && (confirmDeleteEnv = null)">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete this environment?</AlertDialogTitle>
-          <AlertDialogDescription>
-            This permanently removes '{{ confirmDeleteEnv?.name }}' and every key's value for it. This cannot be undone.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" @click="deleteEnvironment">Delete</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

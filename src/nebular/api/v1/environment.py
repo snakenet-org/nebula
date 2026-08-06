@@ -1,11 +1,14 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: Environment CRUD, scoped to a Project — thin wrapper over nebular.environments.
-@ai-context: Every route resolves the Project via nebular.projects.get_visible_project first (404
-  for not-visible), then checks can_view (list) or can_edit (create/delete) before delegating.
-@version: 1.0.0
+@ai-purpose: Environment CRUD — GLOBAL (not scoped to a Project), thin wrapper over
+  nebular.environments.
+@ai-context: List/create/update are available to any authenticated caller (an Environment is shared
+  infra any project owner needs to be able to add to when creating a key) — delete is admin-only,
+  since removing a global Environment can break every Project still linked to it
+  (EnvironmentInUseError below surfaces as a 409 rather than letting an admin nuke it silently).
+@version: 2.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-05
+@date: 2026-08-06
 """
 
 import uuid
@@ -14,75 +17,116 @@ from fastapi import Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nebular import environments as environments_service
-from nebular import projects as projects_service
 from nebular.api.endpoint import Endpoint, get_current_user
 from nebular.database import get_session
-from nebular.environments import DuplicateEnvironmentNameError, EnvironmentNotFoundError
-from nebular.models.environment import EnvironmentCreateRequest, EnvironmentResponse
-from nebular.models.tables import UserAccount
-from nebular.projects import ProjectNotFoundError
+from nebular.environments import (
+    DuplicateEnvironmentNameError,
+    EnvironmentInUseError,
+    EnvironmentNotFoundError,
+)
+from nebular.models.environment import (
+    EnvironmentCreateRequest,
+    EnvironmentResponse,
+    EnvironmentUpdateRequest,
+)
+from nebular.models.tables import Environment, UserAccount
 
 
 class EnvironmentRouter(Endpoint):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.add_api_route(
-            "/{project_id}", self.list_environments, methods=["GET"], response_model=list[EnvironmentResponse]
+            "/", self.list_environments, methods=["GET"], response_model=list[EnvironmentResponse]
         )
         self.add_api_route(
-            "/{project_id}", self.create_environment, methods=["POST"], response_model=EnvironmentResponse, status_code=201
+            "/",
+            self.create_environment,
+            methods=["POST"],
+            response_model=EnvironmentResponse,
+            status_code=201,
         )
         self.add_api_route(
-            "/{project_id}/{environment_id}", self.delete_environment, methods=["DELETE"], status_code=204
+            "/{environment_id}",
+            self.update_environment,
+            methods=["PATCH"],
+            response_model=EnvironmentResponse,
+        )
+        self.add_api_route(
+            "/{environment_id}", self.delete_environment, methods=["DELETE"], status_code=204
         )
 
-    async def _project_or_404(self, session: AsyncSession, actor: UserAccount, project_id: uuid.UUID):
+    async def _to_response(self, session: AsyncSession, environment: Environment) -> EnvironmentResponse:
+        count = await environments_service.count_keys_using(session, environment.id)
+        return EnvironmentResponse(
+            id=environment.id,
+            name=environment.name,
+            description=environment.description,
+            created_at=environment.created_at,
+            secret_key_count=count,
+        )
+
+    async def _environment_or_404(
+        self, session: AsyncSession, environment_id: uuid.UUID
+    ) -> Environment:
         try:
-            return await projects_service.get_visible_project(session, actor, project_id)
-        except ProjectNotFoundError:
-            raise HTTPException(status_code=404, detail="Project not found")
+            return await environments_service.get_environment(session, environment_id)
+        except EnvironmentNotFoundError:
+            raise HTTPException(status_code=404, detail="Environment not found")
 
     async def list_environments(
         self,
-        project_id: uuid.UUID,
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> list[EnvironmentResponse]:
-        await self._project_or_404(session, actor, project_id)
-        rows = await environments_service.list_environments(session, project_id)
-        return [EnvironmentResponse.model_validate(row, from_attributes=True) for row in rows]
+        rows = await environments_service.list_environments(session)
+        return [await self._to_response(session, row) for row in rows]
 
     async def create_environment(
         self,
-        project_id: uuid.UUID,
         payload: EnvironmentCreateRequest,
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> EnvironmentResponse:
-        project, share = await self._project_or_404(session, actor, project_id)
-        if not projects_service.can_edit(actor, project, share):
-            raise HTTPException(status_code=403, detail="You cannot edit this project")
         try:
-            row = await environments_service.create_environment(session, project_id, name=payload.name)
+            row = await environments_service.create_environment(
+                session, name=payload.name, description=payload.description
+            )
         except DuplicateEnvironmentNameError:
             raise HTTPException(status_code=409, detail="An environment with this name already exists")
-        return EnvironmentResponse.model_validate(row, from_attributes=True)
+        return await self._to_response(session, row)
+
+    async def update_environment(
+        self,
+        environment_id: uuid.UUID,
+        payload: EnvironmentUpdateRequest,
+        actor: UserAccount = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session),
+    ) -> EnvironmentResponse:
+        row = await self._environment_or_404(session, environment_id)
+        try:
+            row = await environments_service.update_environment(
+                session, row, name=payload.name, description=payload.description
+            )
+        except DuplicateEnvironmentNameError:
+            raise HTTPException(status_code=409, detail="An environment with this name already exists")
+        return await self._to_response(session, row)
 
     async def delete_environment(
         self,
-        project_id: uuid.UUID,
         environment_id: uuid.UUID,
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> None:
-        project, share = await self._project_or_404(session, actor, project_id)
-        if not projects_service.can_edit(actor, project, share):
-            raise HTTPException(status_code=403, detail="You cannot edit this project")
+        if not actor.is_admin:
+            raise HTTPException(status_code=403, detail="Only an admin may delete an environment")
+        row = await self._environment_or_404(session, environment_id)
         try:
-            row = await environments_service.get_environment(session, project_id, environment_id)
-        except EnvironmentNotFoundError:
-            raise HTTPException(status_code=404, detail="Environment not found")
-        await environments_service.delete_environment(session, row)
+            await environments_service.delete_environment(session, row)
+        except EnvironmentInUseError:
+            raise HTTPException(
+                status_code=409,
+                detail="This environment is still linked from at least one key and cannot be deleted",
+            )
 
 
 router = EnvironmentRouter()

@@ -4,26 +4,30 @@
 @ai-context: UserAccount (local + Authentik-provisioned identities) — Project (owner_id FK, the
   creator) — ProjectShare (composite PK project_id+user_id, ShareRole VIEWER/EDITOR, both FKs CASCADE
   — see nebular.projects for the can_view/can_edit/can_reveal permission matrix built on top of
-  ownership + this table) — Environment (project-scoped, name unique case-insensitively per project
-  via uq_environments_project_name_lower) — SecretKey (project-scoped, cleartext name, unique
+  ownership + this table) — Environment (GLOBAL, not project-scoped — a shared taxonomy of
+  environment names/descriptions any project's keys can be linked to, name unique case-insensitively
+  app-wide via uq_environments_name_lower) — SecretKey (project-scoped, cleartext name, unique
   case-insensitively per project via uq_secret_keys_project_name_lower — the key/variable name a
-  caller passes to api/v1/vault.py) — SecretValue (one row per SecretKey x Environment, `ciphertext`
-  is a Fernet token from nebular.crypto.encrypt_value — NEVER store a plaintext value anywhere, this
-  column and its ORM attribute are the only place a secret's actual content lives at rest) —
-  ProjectAccessKey (a project-scoped API credential, `token_hash` SHA-256 hex + `token_prefix` for
-  UI display — the raw token is returned to the caller exactly once at creation and never stored,
-  same opaque-high-entropy-token reasoning as Singularity's M2MAccount) — VaultMeta (single-row
-  table, one Fernet-encrypted canary value checked at startup — see nebular.crypto's module
-  docstring and main.py's lifespan — to fail fast on a wrong NEBULAR_MASTER_KEY instead of a
-  confusing per-request 500 later).
+  caller passes to api/v1/vault.py; carries its OWN `ciphertext` directly and a required
+  `environment_id` — every key/value pair is linked to exactly one Environment, reassignable via
+  nebular.secrets.update_key, never many-at-once — `ciphertext` is a Fernet token from
+  nebular.crypto.encrypt_value, nullable only because a key can exist before its value is first set;
+  NEVER store a plaintext value anywhere, this column and its ORM attribute are the only place a
+  secret's actual content lives at rest) — ProjectAccessKey (a project-scoped API credential,
+  `token_hash` SHA-256 hex + `token_prefix` for UI display — the raw token is returned to the caller
+  exactly once at creation and never stored, same opaque-high-entropy-token reasoning as
+  Singularity's M2MAccount) — AuditLogEntry (append-only action log — see nebular.audit) —
+  VaultMeta (single-row table, one Fernet-encrypted canary value checked at startup — see
+  nebular.crypto's module docstring and main.py's lifespan — to fail fast on a wrong
+  NEBULAR_MASTER_KEY instead of a confusing per-request 500 later).
 @ai-rules:
-  - `SecretValue.ciphertext` must only ever be written via nebular.crypto.encrypt_value and read via
+  - `SecretKey.ciphertext` must only ever be written via nebular.crypto.encrypt_value and read via
     nebular.crypto.decrypt_value — never assign/return it raw.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 1.0.0
+@version: 2.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-05
+@date: 2026-08-06
 """
 
 import enum
@@ -37,7 +41,6 @@ from sqlalchemy import (
     Index,
     String,
     Text,
-    UniqueConstraint,
     func,
     text,
 )
@@ -85,9 +88,6 @@ class Project(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
-    environments: Mapped[list["Environment"]] = relationship(
-        cascade="all, delete-orphan", passive_deletes=True
-    )
     secret_keys: Mapped[list["SecretKey"]] = relationship(
         cascade="all, delete-orphan", passive_deletes=True
     )
@@ -114,24 +114,24 @@ class ProjectShare(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class VariableType(str, enum.Enum):
+    ENVIRONMENT = "environment"
+    SECRET = "secret"
+
+
 class Environment(Base):
+    """Global — NOT project-scoped. A shared taxonomy any project's SecretKeys link into."""
+
     __tablename__ = "environments"
     __table_args__ = (
-        Index(
-            "uq_environments_project_name_lower",
-            "project_id",
-            text("lower(name)"),
-            unique=True,
-        ),
+        Index("uq_environments_name_lower", text("lower(name)"), unique=True),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    project_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
-    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
@@ -152,41 +152,27 @@ class SecretKey(Base):
     project_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
+    # Every key/value pair is linked to exactly one Environment — reassignable (nebular.secrets.
+    # update_key) but never unset or multi-valued. RESTRICT (not CASCADE) so deleting a still-in-use
+    # global Environment fails loudly instead of silently wiping keys across every project.
+    environment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("environments.id", ondelete="RESTRICT"), nullable=False
+    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    variable_type: Mapped[VariableType] = mapped_column(
+        String(11), default=VariableType.SECRET, nullable=False
+    )
+    # A Fernet token (nebular.crypto.encrypt_value) — never a plaintext value. Nullable: a key can
+    # exist before its value is first set.
+    ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="SET NULL"), nullable=True
+    )
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, server_default=func.now(), onupdate=func.now()
-    )
-
-    values: Mapped[list["SecretValue"]] = relationship(
-        cascade="all, delete-orphan", passive_deletes=True
-    )
-
-
-class SecretValue(Base):
-    __tablename__ = "secret_values"
-    __table_args__ = (
-        UniqueConstraint("secret_key_id", "environment_id", name="uq_secret_values_key_env"),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
-    secret_key_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("secret_keys.id", ondelete="CASCADE"), nullable=False
-    )
-    environment_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("environments.id", ondelete="CASCADE"), nullable=False
-    )
-    # A Fernet token (nebular.crypto.encrypt_value) — never a plaintext value.
-    ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_by: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False
-    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )

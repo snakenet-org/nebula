@@ -92,12 +92,13 @@ export const updateShare = (projectId, userId, payload) =>
 export const revokeShare = (projectId, userId) =>
   request('DELETE', `/api/v1/project/${projectId}/shares/${userId}`);
 
-// ── Environments ─────────────────────────────────────────────────────────
-export const listEnvironments = (projectId) => request('GET', `/api/v1/environment/${projectId}`);
-export const createEnvironment = (projectId, payload) =>
-  request('POST', `/api/v1/environment/${projectId}`, payload);
-export const deleteEnvironment = (projectId, environmentId) =>
-  request('DELETE', `/api/v1/environment/${projectId}/${environmentId}`);
+// ── Environments (global — not project-scoped) ──────────────────────────────
+export const listEnvironments = () => request('GET', '/api/v1/environment/');
+export const createEnvironment = (payload) => request('POST', '/api/v1/environment/', payload);
+export const updateEnvironment = (environmentId, payload) =>
+  request('PATCH', `/api/v1/environment/${environmentId}`, payload);
+export const deleteEnvironment = (environmentId) =>
+  request('DELETE', `/api/v1/environment/${environmentId}`);
 
 // ── Secrets ───────────────────────────────────────────────────────────────
 export const listSecrets = (projectId) => request('GET', `/api/v1/secret/${projectId}`);
@@ -107,8 +108,8 @@ export const updateSecret = (projectId, keyId, payload) =>
 export const deleteSecret = (projectId, keyId) => request('DELETE', `/api/v1/secret/${projectId}/${keyId}`);
 export const setSecretValue = (projectId, keyId, payload) =>
   request('PUT', `/api/v1/secret/${projectId}/${keyId}/value`, payload);
-export const revealSecretValue = (projectId, keyId, environmentId) =>
-  request('GET', `/api/v1/secret/${projectId}/${keyId}/reveal?environment_id=${environmentId}`);
+export const revealSecretValue = (projectId, keyId) =>
+  request('GET', `/api/v1/secret/${projectId}/${keyId}/reveal`);
 
 // ── Access keys ───────────────────────────────────────────────────────────
 export const listAccessKeys = (projectId) => request('GET', `/api/v1/access_key/${projectId}`);
