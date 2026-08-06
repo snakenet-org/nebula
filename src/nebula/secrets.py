@@ -14,13 +14,15 @@
   module does not re-check that itself, since "may this actor see plaintext" is a Project-level
   question answered by nebula.projects, not a secret-key-level one. create_keys_bulk backs the
   Project view's "Upload .env" flow — always creates brand-new keys (never updates an existing key's
-  value), all-or-nothing in one commit.
+  value), all-or-nothing in one commit; `variable_type` is per-item (a (name, value, variable_type)
+  triple), letting the frontend's review dialog pick secret vs. environment variable per row instead
+  of one type for the whole batch.
 @ai-rules:
   - Never log a plaintext value.
   - encrypt_value/decrypt_value only — never import `cryptography` directly here.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 2.1.0
+@version: 2.2.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-06
 """
@@ -162,21 +164,21 @@ async def create_keys_bulk(
     project_id: uuid.UUID,
     *,
     environment_id: uuid.UUID,
-    variable_type: VariableType,
-    items: list[tuple[str, str]],
+    items: list[tuple[str, str, VariableType]],
     created_by: uuid.UUID,
 ) -> list[SecretKey]:
-    """Create every (name, value) pair in `items` as a brand-new key, all in one commit.
+    """Create every (name, value, variable_type) triple in `items` as a brand-new key, one commit.
 
     All-or-nothing, per the "Upload .env" feature's spec: raises BulkDuplicateKeyNamesError (naming
     every conflicting key) and writes nothing at all if any name collides with another item in the
     same batch or with a key that already exists in this Project — a bulk upload never partially
     applies, and it never updates an existing key's value (that's what the per-row value editor is
-    for).
+    for). `variable_type` is per-item (the frontend's review dialog lets the caller pick secret vs.
+    environment variable per row, and skip a row entirely by simply not including it here).
     """
     seen: dict[str, str] = {}
     within_batch_conflicts: list[str] = []
-    for name, _value in items:
+    for name, _value, _variable_type in items:
         lowered = name.lower()
         if lowered in seen:
             within_batch_conflicts.append(name)
@@ -187,7 +189,9 @@ async def create_keys_bulk(
 
     existing = await list_keys(session, project_id)
     existing_lower = {key.name.lower() for key in existing}
-    against_existing_conflicts = [name for name, _value in items if name.lower() in existing_lower]
+    against_existing_conflicts = [
+        name for name, _value, _variable_type in items if name.lower() in existing_lower
+    ]
     if against_existing_conflicts:
         raise BulkDuplicateKeyNamesError(against_existing_conflicts)
 
@@ -202,7 +206,7 @@ async def create_keys_bulk(
             created_by=created_by,
             updated_by=created_by,
         )
-        for name, value in items
+        for name, value, variable_type in items
     ]
     session.add_all(created)
     try:

@@ -1,12 +1,13 @@
-// @ai-purpose: App config composable — OIDC client id, token URL, login-screen feature flags.
+// @ai-purpose: App config composable — OIDC client id, token URL, login-screen feature flags, app
+//   version.
 // @ai-context: Single module-level reactive config, persisted to localStorage so synchronous
 //   consumers (the OIDC PKCE flow needs clientId/tokenUrl before login; LoginView needs the
 //   basic/OIDC toggles before login) have a value immediately on load. fetchConfig() is fired once
 //   at startup (main.js) and refreshes the cache for next time — stale-while-revalidate, nothing
-//   needs to await it.
-// @version: 1.0.0
+//   needs to await it. `version` backs App.vue's footer.
+// @version: 1.1.0
 // @author: Marc Fiedler <marc@snakenet.org>
-// @date: 2026-08-05
+// @date: 2026-08-06
 import { reactive, readonly } from 'vue';
 
 const STORAGE_KEY = 'nebula.config';
@@ -16,6 +17,7 @@ const EMPTY = {
   basicLoginDisabled: false,
   oidcLoginDisabled: true,
   oidcLoginCaption: 'Sign in with snakeNet ID',
+  version: '',
 };
 
 function load() {
@@ -39,6 +41,7 @@ async function fetchConfig() {
       basicLoginDisabled: data.basic_login_disabled,
       oidcLoginDisabled: data.oidc_login_disabled,
       oidcLoginCaption: data.oidc_login_caption,
+      version: data.version ?? '',
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state.config));
   } catch {

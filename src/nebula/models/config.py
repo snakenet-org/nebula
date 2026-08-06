@@ -2,9 +2,11 @@
 """
 @ai-purpose: Pydantic response model for GET /api/v1/config — public, unauthenticated frontend
   bootstrap config (login-screen feature flags + OIDC client id), mirrors Satellite's ConfigResponse.
-@version: 1.0.0
+@ai-context: `version` is the running `nebula.version` string, surfaced so the frontend footer can
+  display it without hardcoding/duplicating it.
+@version: 1.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-05
+@date: 2026-08-06
 """
 
 from pydantic import BaseModel
@@ -16,3 +18,4 @@ class ConfigResponse(BaseModel):
     oidc_login_caption: str
     client_id: str
     token_url: str
+    version: str

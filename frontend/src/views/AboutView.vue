@@ -1,7 +1,7 @@
 <!--
   @ai-purpose: About page — what Nebula Vault is, a link back to the docs, sign-in identity.
   @dependencies: vue, shadcn-vue (card, badge)
-  @version: 2.0.0
+  @version: 2.0.1
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-06
 -->
@@ -18,7 +18,7 @@ const { state: auth } = useAuth();
     <Card>
       <CardContent>
         <div class="flex items-center gap-2 text-xl font-bold mb-4">
-          <img src="/favicon.svg" alt="" width="28" height="28" class="rounded-md" /> Nebula Vault
+          <img src="/favicon.png" alt="" width="28" height="28" class="rounded-md" /> Nebula Vault
         </div>
         <p class="text-muted-foreground text-sm mb-4">
           A self-hosted secrets manager for snakeNet.org — Projects hold Environments, each Environment

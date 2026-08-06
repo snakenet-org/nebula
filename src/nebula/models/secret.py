@@ -10,7 +10,7 @@
   `_to_response`) since it isn't meant to be anonymized — still encrypted at rest identically to a
   secret (see nebula.crypto), the distinction is purely a frontend display/reveal-gating rule, not an
   encryption one.
-@version: 3.1.0
+@version: 3.2.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-06
 """
@@ -33,18 +33,20 @@ class SecretKeyCreateRequest(BaseModel):
 class SecretBulkItem(BaseModel):
     name: str
     value: str
+    variable_type: VariableType = VariableType.SECRET
 
 
 class SecretBulkCreateRequest(BaseModel):
     """Backs the Project view's "Upload .env" flow — every item is a NEW key, none are updates.
 
     The frontend has already parsed/validated the uploaded file into name/value pairs before this
-    ever gets sent — see frontend/src/lib/envFile.js. `environment_id`/`variable_type` apply to
-    every item in the batch (there's one confirmation dialog for the whole upload, not one per key).
+    ever gets sent — see frontend/src/lib/envFile.js. `environment_id` applies to every item in the
+    batch (there's one confirmation dialog for the whole upload, not one per key) — `variable_type`
+    is chosen per item instead (the review dialog's per-row Type Select), and a row the user toggled
+    off in that dialog is simply never included here, so "skip on import" needs no field of its own.
     """
 
     environment_id: uuid.UUID
-    variable_type: VariableType = VariableType.SECRET
     items: list[SecretBulkItem]
 
 

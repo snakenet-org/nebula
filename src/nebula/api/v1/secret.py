@@ -7,12 +7,13 @@
   (owner/admin only — see nebula.projects' module docstring for why a shared EDITOR can change a
   value but never decrypt one back). bulk_create_keys backs the Project view's "Upload .env" button —
   same can_edit gate, always creates brand-new keys (409s naming every conflict rather than updating
-  an existing key), one Environment/variable_type applied to the whole batch.
+  an existing key); one Environment applies to the whole batch, but `variable_type` is per-item
+  (SecretBulkItem) so the review dialog can pick secret vs. environment variable per row.
 @ai-rules:
   - Never include SecretKey.ciphertext or a decrypted value in any response except reveal_value's.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 3.1.0
+@version: 3.2.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-06
 """
@@ -177,8 +178,7 @@ class SecretRouter(Endpoint):
                 session,
                 project_id,
                 environment_id=payload.environment_id,
-                variable_type=payload.variable_type,
-                items=[(item.name, item.value) for item in payload.items],
+                items=[(item.name, item.value, item.variable_type) for item in payload.items],
                 created_by=actor.id,
             )
         except BulkDuplicateKeyNamesError as exc:

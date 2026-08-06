@@ -12,13 +12,23 @@
     value is an inline per-row shadcn-vue Popover. Deleting a key goes through a shadcn-vue
     AlertDialog. "Upload .env" bulk-adds keys from a pasted-in file: lib/envFile.js parses the raw
     text client-side (rejecting the whole file if any non-comment/non-blank line fails to parse),
-    then a shadcn-vue Dialog lets the user pick a target Environment + variable type and review the
-    parsed key names before POSTing them all at once to /secret/{project_id}/bulk
-    (api.bulkCreateSecrets) — always creates brand-new keys, never updates an existing one; the
-    backend 409s (naming every conflict) rather than silently overwriting anything.
+    then a shadcn-vue Dialog lets the user pick a target Environment and review the parsed keys
+    row-by-row — each row gets its own "import this key" Checkbox (default checked; unchecked rows
+    are simply left out of the POST body, no dedicated skip field needed) and its own Type Select
+    (secret/environment variable, default secret), not one Type for the whole batch — before
+    POSTing the included rows at once to /secret/{project_id}/bulk (api.bulkCreateSecrets) — always
+    creates brand-new keys, never updates an existing one; the backend 409s (naming every conflict)
+    rather than silently overwriting anything.
+    The hidden file `<input>` behind "Upload .env" deliberately carries NO `accept` attribute:
+    macOS's native file picker treats an `accept` list of extensions as a hard filter and, for a
+    dotfile-only pattern like `.env` (no distinguishing extension after the leading dot), silently
+    hides matching files from the listing even while their containing folder stays navigable — the
+    user could browse into a folder but never actually select the `.env` file inside it. Dropping
+    `accept` entirely restores the native "All Files" option, matching macOS Finder's convention that
+    a dotfile shows once "all files" (not an extension filter) is in effect.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input, label,
-    select, table, popover, alert-dialog, dialog, skeleton)
-  @version: 4.1.0
+    select, table, popover, checkbox, alert-dialog, dialog, skeleton)
+  @version: 5.0.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-06
 -->
@@ -35,6 +45,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -108,10 +119,20 @@ async function addKey() {
 // if a single line can't be parsed — parseEnvFile never returns a partial result.
 const envFileInput = ref(null);
 const uploadDialogOpen = ref(false);
+// Each row: { name, value, variable_type, included } — `included` is the per-row "import this
+// key or not" toggle; an unchecked row is simply left out of the payload built in confirmUpload,
+// so "skip on import" needs no dedicated backend field.
 const uploadItems = ref([]);
 const uploadEnvironmentId = ref('');
-const uploadVariableType = ref('secret');
 const uploadSubmitting = ref(false);
+
+const uploadIncludedCount = computed(() => uploadItems.value.filter((i) => i.included).length);
+const uploadAllIncluded = computed(
+  () => uploadItems.value.length > 0 && uploadIncludedCount.value === uploadItems.value.length
+);
+function toggleUploadAll(checked) {
+  uploadItems.value.forEach((item) => (item.included = checked));
+}
 
 function openEnvFilePicker() {
   envFileInput.value?.click();
@@ -136,20 +157,19 @@ async function onEnvFileSelected(event) {
     return;
   }
 
-  uploadItems.value = items;
+  uploadItems.value = items.map((item) => ({ ...item, variable_type: 'secret', included: true }));
   uploadEnvironmentId.value = environments.value.length === 1 ? environments.value[0].id : '';
-  uploadVariableType.value = 'secret';
   uploadDialogOpen.value = true;
 }
 
 async function confirmUpload() {
-  if (!uploadEnvironmentId.value || !uploadItems.value.length) return;
+  const selected = uploadItems.value.filter((i) => i.included);
+  if (!uploadEnvironmentId.value || !selected.length) return;
   uploadSubmitting.value = true;
   try {
     const created = await api.bulkCreateSecrets(props.projectId, {
       environment_id: uploadEnvironmentId.value,
-      variable_type: uploadVariableType.value,
-      items: uploadItems.value.map(({ name, value }) => ({ name, value })),
+      items: selected.map(({ name, value, variable_type }) => ({ name, value, variable_type })),
     });
     keys.value.push(...created);
     toast.success(`Added ${created.length} variable${created.length === 1 ? '' : 's'}.`);
@@ -278,7 +298,6 @@ async function saveValue() {
           <input
             ref="envFileInput"
             type="file"
-            accept=".env,text/plain"
             class="hidden"
             @change="onEnvFileSelected"
           />
@@ -423,49 +442,68 @@ async function saveValue() {
     </template>
 
     <Dialog :open="uploadDialogOpen" @update:open="(v) => !v && (uploadDialogOpen = false)">
-      <DialogContent class="sm:max-w-lg">
+      <DialogContent class="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Add {{ uploadItems.length }} variable{{ uploadItems.length === 1 ? '' : 's' }} from file</DialogTitle>
+          <DialogTitle>{{ uploadItems.length }} variable{{ uploadItems.length === 1 ? '' : 's' }} found in file</DialogTitle>
           <DialogDescription>
-            Review before adding — this creates {{ uploadItems.length === 1 ? 'a new key' : 'new keys' }}
-            only; it never overwrites an existing key's value.
+            Choose the target environment, then pick a type and whether to import each key — this
+            only ever creates new keys, never overwrites an existing one.
           </DialogDescription>
         </DialogHeader>
         <div class="space-y-3">
-          <div class="grid grid-cols-2 gap-3">
-            <div class="space-y-1.5">
-              <Label for="upload-env">Environment</Label>
-              <Select v-model="uploadEnvironmentId">
-                <SelectTrigger id="upload-env" class="w-full"><SelectValue placeholder="Choose one" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="space-y-1.5">
-              <Label for="upload-type">Type</Label>
-              <Select v-model="uploadVariableType">
-                <SelectTrigger id="upload-type" class="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="secret">Secret</SelectItem>
-                  <SelectItem value="environment">Environment variable</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
           <div class="space-y-1.5">
-            <Label>Keys found</Label>
-            <div class="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto rounded-md border p-2">
-              <Badge v-for="item in uploadItems" :key="item.name" variant="outline" class="font-mono">
-                {{ item.name }}
-              </Badge>
-            </div>
+            <Label for="upload-env">Environment</Label>
+            <Select v-model="uploadEnvironmentId">
+              <SelectTrigger id="upload-env" class="w-full"><SelectValue placeholder="Choose one" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div class="rounded-md border max-h-80 overflow-y-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead class="w-10">
+                    <Checkbox
+                      :model-value="uploadAllIncluded"
+                      title="Select all"
+                      @update:model-value="toggleUploadAll"
+                    />
+                  </TableHead>
+                  <TableHead>Key</TableHead>
+                  <TableHead>Value</TableHead>
+                  <TableHead class="w-44">Type</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="item in uploadItems" :key="item.name" :class="{ 'opacity-50': !item.included }">
+                  <TableCell>
+                    <Checkbox v-model="item.included" :title="item.included ? 'Skip this key' : 'Import this key'" />
+                  </TableCell>
+                  <TableCell class="font-mono font-semibold">{{ item.name }}</TableCell>
+                  <TableCell class="font-mono text-muted-foreground max-w-56 truncate" :title="item.value">
+                    {{ item.value || '—' }}
+                  </TableCell>
+                  <TableCell>
+                    <Select v-model="item.variable_type" :disabled="!item.included">
+                      <SelectTrigger size="sm" class="w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="secret">Secret</SelectItem>
+                        <SelectItem value="environment">Environment variable</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="uploadDialogOpen = false">Cancel</Button>
-          <Button :disabled="uploadSubmitting || !uploadEnvironmentId" @click="confirmUpload">
-            Add {{ uploadItems.length }} variable{{ uploadItems.length === 1 ? '' : 's' }}
+          <Button :disabled="uploadSubmitting || !uploadEnvironmentId || !uploadIncludedCount" @click="confirmUpload">
+            Add {{ uploadIncludedCount }} variable{{ uploadIncludedCount === 1 ? '' : 's' }}
           </Button>
         </DialogFooter>
       </DialogContent>

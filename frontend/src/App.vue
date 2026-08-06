@@ -17,12 +17,18 @@
     collapse/expand toggle IS the Nebula Vault logo button itself (no separate `PhSidebarSimple`
     footer button anymore) — clicking the logo toggles `sidebarExpanded` rather than navigating (Home
     already covers "go to the project list"). About moved out of the scrollable nav list and into the
-    footer, directly above Log out — the footer's fixed order is now: identity row, About, Log out.
-    Toasts render via a single root-level Sonner `<Toaster>` (vue-sonner) — any view calls
-    `toast.success()`/`toast.error()` imported directly from 'vue-sonner'.
+    sidebar's own bottom block, directly above Log out — that block's fixed order is now: identity
+    row, About, Log out.
+    Toasts render via a single root-level Sonner `<Toaster>` (vue-sonner), top-center — any view
+    calls `toast.success()`/`toast.error()` imported directly from 'vue-sonner'.
+    2026-08-06: the old top `<header>` bar (just the "Generate password" button) is gone — replaced
+    by a sticky `<footer>` at the bottom of `<main>`: the Generate-password button bottom-left, the
+    running version + "Powered by snakeNet.org" bottom-right (`useConfig().state.version`, forwarded
+    from `GET /api/v1/config`'s new `version` field). Removing the header instead of just relocating
+    the button reclaims a full row of vertical space for the page content above it.
   @dependencies: vue, @phosphor-icons/vue, vue-sonner, shadcn-vue (button, tooltip, separator,
     avatar, sonner)
-  @version: 4.0.0
+  @version: 5.0.1
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-06
 -->
@@ -35,6 +41,7 @@ import { Separator } from '@/components/ui/separator';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useAuth } from './composables/useAuth';
+import { useConfig } from './composables/useConfig';
 import * as oidc from './services/oidc';
 import * as api from './services/api';
 import PasswordGeneratorDialog from './components/PasswordGeneratorDialog.vue';
@@ -51,6 +58,7 @@ import AboutView from './views/AboutView.vue';
 const showPasswordGenerator = ref(false);
 
 const { state: auth, logout, refreshSession } = useAuth();
+const { state: appConfig } = useConfig();
 
 const path = ref(window.location.pathname);
 window.addEventListener('popstate', () => (path.value = window.location.pathname));
@@ -137,23 +145,32 @@ onUnmounted(() => document.removeEventListener('visibilitychange', _handleVisibi
 </script>
 
 <template>
-  <Toaster position="bottom-center" />
+  <Toaster position="top-center" />
 
   <div class="relative min-h-screen flex" style="z-index: 1">
     <main class="flex-1 flex flex-col min-w-0">
-      <header
-        v-if="isAuthed"
-        class="sticky top-0 z-30 flex items-center justify-end gap-2 px-4 py-2.5 border-b border-border bg-card/70 backdrop-blur-xl backdrop-saturate-150"
-      >
-        <Button variant="outline" size="sm" @click="showPasswordGenerator = true">
-          <PhPassword :size="16" weight="bold" /> Generate password
-        </Button>
-      </header>
       <div :class="['page-content', { 'page-entering': transitioning }]">
         <ReentryView v-if="!isAuthed && reentry" @done="reentry = false" />
         <LoginView v-else-if="!isAuthed" @navigate="navigate" />
         <component :is="currentView" v-else :project-id="projectId || undefined" @navigate="navigate" />
       </div>
+      <footer
+        v-if="isAuthed"
+        class="sticky bottom-0 z-30 flex items-center justify-between gap-2 px-4 py-2.5 border-t border-border bg-card/70 backdrop-blur-xl backdrop-saturate-150"
+      >
+        <Button variant="outline" size="sm" @click="showPasswordGenerator = true">
+          <PhPassword :size="16" weight="bold" /> Generate password
+        </Button>
+        <span class="text-xs text-muted-foreground">
+          <template v-if="appConfig.config.version">v{{ appConfig.config.version }}<span class="mx-1.5">|</span></template>Powered by
+          <a
+            href="https://snakeNet.org/"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="hover:text-foreground underline-offset-2 hover:underline"
+          >snakeNet.org</a>
+        </span>
+      </footer>
     </main>
 
     <PasswordGeneratorDialog v-model:open="showPasswordGenerator" />
@@ -170,7 +187,7 @@ onUnmounted(() => document.removeEventListener('visibilitychange', _handleVisibi
               :class="sidebarExpanded ? 'justify-start' : 'justify-center'"
               @click="sidebarExpanded = !sidebarExpanded"
             >
-              <img src="/favicon.svg" alt="" width="24" height="24" class="rounded-md shrink-0" />
+              <img src="/favicon.png" alt="" width="24" height="24" class="rounded-md shrink-0" />
               <span v-if="sidebarExpanded" class="font-bold text-sm truncate">Nebula Vault</span>
             </button>
           </TooltipTrigger>

@@ -8,7 +8,7 @@
     this app's palette (see style.css's header comment) — honours prefers-reduced-motion. Built from
     shadcn-vue Card/Input/Label/Button.
   @dependencies: vue, vue-sonner, shadcn-vue (card, input, label, button)
-  @version: 2.0.0
+  @version: 2.0.1
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-06
 -->
@@ -68,7 +68,7 @@ async function oidcLogin() {
       <CardContent class="px-8">
         <div class="mb-7">
           <h1 class="text-2xl font-bold flex items-center gap-2">
-            <img src="/favicon.svg" alt="" width="26" height="26" class="rounded-md" /> Nebula Vault
+            <img src="/favicon.png" alt="" width="26" height="26" class="rounded-md" /> Nebula Vault
           </h1>
           <p class="text-muted-foreground text-sm mt-1">A self-hosted secrets manager for snakeNet.org</p>
         </div>

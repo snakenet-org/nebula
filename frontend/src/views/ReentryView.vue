@@ -7,7 +7,7 @@
     error and bails back to the login screen via the `done` event. Built from shadcn-vue Card/Button;
     the spinner is a Phosphor icon + Tailwind's `animate-spin`, no bespoke keyframes needed.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, button)
-  @version: 2.0.0
+  @version: 2.0.1
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-06
 -->
@@ -60,7 +60,7 @@ onMounted(async () => {
     <Card class="w-full max-w-sm">
       <CardContent class="px-8 text-center">
         <div class="flex items-center justify-center gap-2 text-2xl font-bold mb-5">
-          <img src="/favicon.svg" alt="" width="26" height="26" class="rounded-md" /> Nebula Vault
+          <img src="/favicon.png" alt="" width="26" height="26" class="rounded-md" /> Nebula Vault
         </div>
 
         <template v-if="!failed">
