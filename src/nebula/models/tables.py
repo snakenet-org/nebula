@@ -13,19 +13,21 @@
   nebula.secrets.update_key, never many-at-once — `ciphertext` is a Fernet token from
   nebula.crypto.encrypt_value, nullable only because a key can exist before its value is first set;
   NEVER store a plaintext value anywhere, this column and its ORM attribute are the only place a
-  secret's actual content lives at rest) — ProjectAccessKey (a project-scoped API credential,
-  `token_hash` SHA-256 hex + `token_prefix` for UI display — the raw token is returned to the caller
-  exactly once at creation and never stored, same opaque-high-entropy-token reasoning as
-  Singularity's M2MAccount) — AuditLogEntry (append-only action log — see nebula.audit) —
-  VaultMeta (single-row table, one Fernet-encrypted canary value checked at startup — see
-  nebula.crypto's module docstring and main.py's lifespan — to fail fast on a wrong
-  NEBULA_MASTER_KEY instead of a confusing per-request 500 later).
+  secret's actual content lives at rest) — ProjectGithubSync (a Project may have MANY simultaneous
+  GitHub sync targets since the 2026-08-06 multi-repo redesign — see nebula.github_sync; each row is
+  its own repo_url + encrypted PAT + enabled flag + last-run status, `project_id` FK CASCADE) —
+  ProjectAccessKey (a project-scoped API credential, `token_hash` SHA-256 hex + `token_prefix` for UI
+  display — the raw token is returned to the caller exactly once at creation and never stored, same
+  opaque-high-entropy-token reasoning as Singularity's M2MAccount) — AuditLogEntry (append-only
+  action log — see nebula.audit) — VaultMeta (single-row table, one Fernet-encrypted canary value
+  checked at startup — see nebula.crypto's module docstring and main.py's lifespan — to fail fast on
+  a wrong NEBULA_MASTER_KEY instead of a confusing per-request 500 later).
 @ai-rules:
-  - `SecretKey.ciphertext` must only ever be written via nebula.crypto.encrypt_value and read via
-    nebula.crypto.decrypt_value — never assign/return it raw.
+  - `SecretKey.ciphertext`/`ProjectGithubSync.pat_ciphertext` must only ever be written via
+    nebula.crypto.encrypt_value and read via nebula.crypto.decrypt_value — never assign/return raw.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 3.0.0
+@version: 4.0.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-06
 """
@@ -83,12 +85,6 @@ class Project(Base):
     owner_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False
     )
-    # GitHub sync (see nebula.github_sync) — both optional, set together via
-    # github_sync.update_github_config. github_pat_ciphertext is a Fernet token
-    # (nebula.crypto.encrypt_value), same as SecretKey.ciphertext — a PAT is a credential like any
-    # other secret and is NEVER returned in an API response, only a `github_connected` bool.
-    github_repo_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    github_pat_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
@@ -101,6 +97,9 @@ class Project(Base):
         cascade="all, delete-orphan", passive_deletes=True
     )
     access_keys: Mapped[list["ProjectAccessKey"]] = relationship(
+        cascade="all, delete-orphan", passive_deletes=True
+    )
+    github_syncs: Mapped[list["ProjectGithubSync"]] = relationship(
         cascade="all, delete-orphan", passive_deletes=True
     )
 
@@ -178,6 +177,44 @@ class SecretKey(Base):
     created_by: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False
     )
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ProjectGithubSync(Base):
+    """One of possibly MANY simultaneous GitHub sync targets for a Project — see nebula.github_sync.
+
+    Every enabled row for a Project is pushed to on every secret/variable value change (create,
+    update, delete, value set, bulk upload), not just when a human clicks "Sync now" — see
+    nebula.github_sync.sync_all_for_project, called from every mutating route in api/v1/secret.py.
+    """
+
+    __tablename__ = "project_github_syncs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Optional human label (e.g. "production", "staging") — purely cosmetic, never used to resolve
+    # the target; falls back to the owner/repo parsed from repo_url when blank (see
+    # nebula.github_sync.target_display_name).
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    repo_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    # A Fernet token (nebula.crypto.encrypt_value), same as SecretKey.ciphertext — a PAT is a
+    # credential like any other secret and is NEVER returned in an API response.
+    pat_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    # A disabled target is skipped by both the automatic on-change sync and the "Sync all now"
+    # button, but can still be triggered individually — lets an admin pause a flaky/retired
+    # integration without losing its stored repo_url/PAT.
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_sync_success: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # gh CLI stderr / a summary count — never a plaintext secret value (see nebula.github_sync).
+    last_sync_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()

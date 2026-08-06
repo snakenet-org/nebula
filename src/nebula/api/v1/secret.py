@@ -9,11 +9,21 @@
   same can_edit gate, always creates brand-new keys (409s naming every conflict rather than updating
   an existing key); one Environment applies to the whole batch, but `variable_type` is per-item
   (SecretBulkItem) so the review dialog can pick secret vs. environment variable per row.
+  Since the same-day multi-repo GitHub sync redesign, every route that changes what a value actually
+  IS (update_key, delete_key, set_value, bulk_create_keys — deliberately NOT create_key, which never
+  has a value yet) calls `_auto_sync_github` right after its own commit — this fans out to every
+  enabled ProjectGithubSync target via nebula.github_sync.sync_all_for_project, so a linked repository
+  never goes stale waiting for someone to remember to click "Sync now". This runs synchronously,
+  in-request (there is no background task queue in this app), and is fully best-effort: a GitHub
+  failure is recorded to the audit log per target but NEVER raised back into the route, so a value
+  change always succeeds/responds on its own merits regardless of GitHub's availability.
 @ai-rules:
   - Never include SecretKey.ciphertext or a decrypted value in any response except reveal_value's.
+  - A GitHub sync failure triggered by _auto_sync_github must never surface as an error response for
+    the secret mutation that triggered it — catch broadly, audit-log, and move on.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 3.2.0
+@version: 4.0.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-06
 """
@@ -21,10 +31,12 @@
 import uuid
 
 from fastapi import Depends, HTTPException, Request
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nebula import audit as audit_service
 from nebula import environments as environments_service
+from nebula import github_sync as github_sync_service
 from nebula import projects as projects_service
 from nebula import secrets as secrets_service
 from nebula.api.endpoint import Endpoint, get_current_user
@@ -46,6 +58,30 @@ from nebula.secrets import (
     SecretKeyNotFoundError,
     SecretValueNotFoundError,
 )
+
+
+async def _auto_sync_github(
+    session: AsyncSession, actor: UserAccount, request: Request, project_id: uuid.UUID
+) -> None:
+    """Best-effort fan-out to every enabled GitHub sync target after a value-affecting mutation —
+    see the module docstring. Never raises."""
+    try:
+        results = await github_sync_service.sync_all_for_project(session, project_id)
+    except Exception:
+        logger.exception("Auto GitHub sync crashed for project {}", project_id)
+        return
+    for result in results:
+        detail = result["error"] or (
+            f"{result['secrets_synced']} secret(s), {result['variables_synced']} variable(s) across "
+            f"{result['environments_synced']} environment(s)"
+            + (f"; {len(result['failures'])} failure(s)" if result["failures"] else "")
+        )
+        await audit_service.record_user_action(
+            session, actor, request,
+            action="github_sync_target.sync", object_type="project_github_sync",
+            object_id=result["target_id"], object_label=result["name"], project_id=project_id,
+            success=result["success"], detail=f"Auto-sync on value change: {detail}",
+        )
 
 
 async def _to_response(session: AsyncSession, key: SecretKey) -> SecretKeyResponse:
@@ -197,6 +233,7 @@ class SecretRouter(Endpoint):
                 action="secret.create", object_type="secret_key", object_id=row.id,
                 object_label=row.name, project_id=project_id, detail="Bulk .env upload",
             )
+        await _auto_sync_github(session, actor, request, project_id)
         return [await _to_response(session, row) for row in rows]
 
     async def update_key(
@@ -230,6 +267,7 @@ class SecretRouter(Endpoint):
             action="secret.update", object_type="secret_key", object_id=key.id,
             object_label=key.name, project_id=project_id,
         )
+        await _auto_sync_github(session, actor, request, project_id)
         return await _to_response(session, key)
 
     async def delete_key(
@@ -251,6 +289,7 @@ class SecretRouter(Endpoint):
             action="secret.delete", object_type="secret_key", object_id=key_id_copy,
             object_label=key_name, project_id=project_id,
         )
+        await _auto_sync_github(session, actor, request, project_id)
 
     async def set_value(
         self,
@@ -271,6 +310,7 @@ class SecretRouter(Endpoint):
             action="secret.value_set", object_type="secret_key", object_id=key.id,
             object_label=key.name, project_id=project_id,
         )
+        await _auto_sync_github(session, actor, request, project_id)
         return await _to_response(session, key)
 
     async def reveal_value(

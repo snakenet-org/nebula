@@ -9,12 +9,17 @@
   the caller has already proven they can at least view the Project, so "you can see it but not edit
   it" reads as a distinct, honest error from "this doesn't exist." Share-list/manage routes are
   owner+admin only (can_manage_sharing) — a shared viewer/editor cannot see who else the Project is
-  shared with, kept deliberately conservative pending an actual UX need to loosen that.
+  shared with, kept deliberately conservative pending an actual UX need to loosen that. GitHub sync
+  target routes (/github/targets*) are the multi-repo redesign's CRUD surface — same can_manage_github
+  (owner/admin) gate as before, now per-target instead of per-project singular config; /github/sync
+  fans out to every enabled target (nebula.github_sync.sync_all_for_project) — the same fan-out
+  api/v1/secret.py's mutating routes now call automatically after every value change.
 @ai-rules:
-  - Never expose ProjectShare rows or Project existence to a caller who fails can_view.
+  - Never expose ProjectShare rows, a sync target's PAT, or Project existence to a caller who fails
+    can_view/can_manage_github respectively.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 2.0.0
+@version: 3.0.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-06
 """
@@ -30,18 +35,20 @@ from nebula import projects as projects_service
 from nebula import users
 from nebula.api.endpoint import Endpoint, get_current_user
 from nebula.database import get_session
-from nebula.github_sync import GitHubAuthError, GitHubNotConfiguredError, InvalidRepoUrlError
+from nebula.github_sync import GitHubAuthError, GitHubSyncTargetNotFoundError, InvalidRepoUrlError
 from nebula.models.project import (
     ProjectCreateRequest,
-    ProjectGithubConfigRequest,
-    ProjectGithubSyncResponse,
+    ProjectGithubSyncResultResponse,
+    ProjectGithubSyncTargetCreateRequest,
+    ProjectGithubSyncTargetResponse,
+    ProjectGithubSyncTargetUpdateRequest,
     ProjectResponse,
     ProjectShareCreateRequest,
     ProjectShareResponse,
     ProjectShareUpdateRequest,
     ProjectUpdateRequest,
 )
-from nebula.models.tables import Project, ProjectShare, ShareRole, UserAccount
+from nebula.models.tables import Project, ProjectGithubSync, ProjectShare, ShareRole, UserAccount
 from nebula.projects import (
     DuplicateProjectShareError,
     ProjectNotFoundError,
@@ -74,9 +81,36 @@ async def _to_response(
         updated_at=project.updated_at,
         my_role=my_role,
         secret_key_count=key_count,
-        github_repo_url=project.github_repo_url,
-        github_connected=github_sync_service.has_github_config(project),
     )
+
+
+def _to_target_response(target: ProjectGithubSync) -> ProjectGithubSyncTargetResponse:
+    return ProjectGithubSyncTargetResponse(
+        id=target.id,
+        project_id=target.project_id,
+        name=github_sync_service.target_display_name(target),
+        repo_url=target.repo_url,
+        enabled=target.enabled,
+        last_synced_at=target.last_synced_at,
+        last_sync_success=target.last_sync_success,
+        last_sync_detail=target.last_sync_detail,
+        created_at=target.created_at,
+        updated_at=target.updated_at,
+    )
+
+
+def _to_result_response(result: github_sync_service.SyncResult) -> ProjectGithubSyncResultResponse:
+    return ProjectGithubSyncResultResponse(**result)
+
+
+def _summarize(result: github_sync_service.SyncResult) -> str:
+    detail = (
+        f"{result['secrets_synced']} secret(s), {result['variables_synced']} variable(s) across "
+        f"{result['environments_synced']} environment(s)"
+    )
+    if result["failures"]:
+        detail += f"; {len(result['failures'])} failure(s)"
+    return detail
 
 
 class ProjectRouter(Endpoint):
@@ -101,14 +135,41 @@ class ProjectRouter(Endpoint):
             "/{project_id}/shares/{user_id}", self.revoke_share, methods=["DELETE"], status_code=204
         )
         self.add_api_route(
-            "/{project_id}/github", self.update_github, methods=["PATCH"], response_model=ProjectResponse
+            "/{project_id}/github/targets",
+            self.list_github_targets,
+            methods=["GET"],
+            response_model=list[ProjectGithubSyncTargetResponse],
         )
-        self.add_api_route("/{project_id}/github", self.disconnect_github, methods=["DELETE"], status_code=204)
+        self.add_api_route(
+            "/{project_id}/github/targets",
+            self.create_github_target,
+            methods=["POST"],
+            response_model=ProjectGithubSyncTargetResponse,
+            status_code=201,
+        )
+        self.add_api_route(
+            "/{project_id}/github/targets/{target_id}",
+            self.update_github_target,
+            methods=["PATCH"],
+            response_model=ProjectGithubSyncTargetResponse,
+        )
+        self.add_api_route(
+            "/{project_id}/github/targets/{target_id}",
+            self.delete_github_target,
+            methods=["DELETE"],
+            status_code=204,
+        )
+        self.add_api_route(
+            "/{project_id}/github/targets/{target_id}/sync",
+            self.sync_github_target,
+            methods=["POST"],
+            response_model=ProjectGithubSyncResultResponse,
+        )
         self.add_api_route(
             "/{project_id}/github/sync",
-            self.sync_github,
+            self.sync_github_all,
             methods=["POST"],
-            response_model=ProjectGithubSyncResponse,
+            response_model=list[ProjectGithubSyncResultResponse],
         )
 
     async def list_projects(
@@ -306,33 +367,85 @@ class ProjectRouter(Endpoint):
             object_label=f"{project.name} → {user.username if user else user_id}", project_id=project.id,
         )
 
-    async def update_github(
+    async def _github_target_or_404(
+        self, session: AsyncSession, project_id: uuid.UUID, target_id: uuid.UUID
+    ) -> ProjectGithubSync:
+        try:
+            return await github_sync_service.get_sync_target(session, project_id, target_id)
+        except GitHubSyncTargetNotFoundError:
+            raise HTTPException(status_code=404, detail="GitHub sync target not found")
+
+    async def list_github_targets(
         self,
         project_id: uuid.UUID,
-        payload: ProjectGithubConfigRequest,
+        actor: UserAccount = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session),
+    ) -> list[ProjectGithubSyncTargetResponse]:
+        project, _share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_github(actor, project):
+            raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
+        targets = await github_sync_service.list_sync_targets(session, project_id)
+        return [_to_target_response(t) for t in targets]
+
+    async def create_github_target(
+        self,
+        project_id: uuid.UUID,
+        payload: ProjectGithubSyncTargetCreateRequest,
         request: Request,
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
-    ) -> ProjectResponse:
-        project, share = await self._get_or_404(session, actor, project_id)
+    ) -> ProjectGithubSyncTargetResponse:
+        project, _share = await self._get_or_404(session, actor, project_id)
         if not projects_service.can_manage_github(actor, project):
             raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
         try:
-            project = await github_sync_service.update_github_config(
-                session, project, repo_url=payload.repo_url, pat=payload.pat
+            target = await github_sync_service.create_sync_target(
+                session, project, repo_url=payload.repo_url, pat=payload.pat, name=payload.name
             )
         except InvalidRepoUrlError:
             raise HTTPException(status_code=422, detail="Not a valid GitHub repository URL")
         await audit_service.record_user_action(
             session, actor, request,
-            action="project.github_config_update", object_type="project", object_id=project.id,
-            object_label=project.name, project_id=project.id,
+            action="github_sync_target.create", object_type="project_github_sync", object_id=target.id,
+            object_label=github_sync_service.target_display_name(target), project_id=project.id,
         )
-        return await _to_response(session, actor, project, share)
+        return _to_target_response(target)
 
-    async def disconnect_github(
+    async def update_github_target(
         self,
         project_id: uuid.UUID,
+        target_id: uuid.UUID,
+        payload: ProjectGithubSyncTargetUpdateRequest,
+        request: Request,
+        actor: UserAccount = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session),
+    ) -> ProjectGithubSyncTargetResponse:
+        project, _share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_github(actor, project):
+            raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
+        target = await self._github_target_or_404(session, project_id, target_id)
+        try:
+            target = await github_sync_service.update_sync_target(
+                session,
+                target,
+                name=payload.name,
+                repo_url=payload.repo_url,
+                pat=payload.pat,
+                enabled=payload.enabled,
+            )
+        except InvalidRepoUrlError:
+            raise HTTPException(status_code=422, detail="Not a valid GitHub repository URL")
+        await audit_service.record_user_action(
+            session, actor, request,
+            action="github_sync_target.update", object_type="project_github_sync", object_id=target.id,
+            object_label=github_sync_service.target_display_name(target), project_id=project.id,
+        )
+        return _to_target_response(target)
+
+    async def delete_github_target(
+        self,
+        project_id: uuid.UUID,
+        target_id: uuid.UUID,
         request: Request,
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
@@ -340,50 +453,76 @@ class ProjectRouter(Endpoint):
         project, _share = await self._get_or_404(session, actor, project_id)
         if not projects_service.can_manage_github(actor, project):
             raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
-        await github_sync_service.clear_github_config(session, project)
+        target = await self._github_target_or_404(session, project_id, target_id)
+        target_id_copy, target_label = target.id, github_sync_service.target_display_name(target)
+        await github_sync_service.delete_sync_target(session, target)
         await audit_service.record_user_action(
             session, actor, request,
-            action="project.github_disconnect", object_type="project", object_id=project.id,
-            object_label=project.name, project_id=project.id,
+            action="github_sync_target.delete", object_type="project_github_sync", object_id=target_id_copy,
+            object_label=target_label, project_id=project.id,
         )
 
-    async def sync_github(
+    async def sync_github_target(
+        self,
+        project_id: uuid.UUID,
+        target_id: uuid.UUID,
+        request: Request,
+        actor: UserAccount = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session),
+    ) -> ProjectGithubSyncResultResponse:
+        project, _share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_github(actor, project):
+            raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
+        target = await self._github_target_or_404(session, project_id, target_id)
+        try:
+            outcome = await github_sync_service.sync_to_github(session, target)
+            result: github_sync_service.SyncResult = {
+                "target_id": target.id,
+                "name": github_sync_service.target_display_name(target),
+                "repo_url": target.repo_url,
+                "success": not outcome["failures"],
+                "error": None,
+                **outcome,
+            }
+        except GitHubAuthError as exc:
+            result = {
+                "target_id": target.id,
+                "name": github_sync_service.target_display_name(target),
+                "repo_url": target.repo_url,
+                "success": False,
+                "error": str(exc),
+                "environments_synced": 0,
+                "secrets_synced": 0,
+                "variables_synced": 0,
+                "failures": [],
+            }
+        await audit_service.record_user_action(
+            session, actor, request,
+            action="github_sync_target.sync", object_type="project_github_sync", object_id=target.id,
+            object_label=result["name"], project_id=project.id,
+            success=result["success"], detail=result["error"] or _summarize(result),
+        )
+        return _to_result_response(result)
+
+    async def sync_github_all(
         self,
         project_id: uuid.UUID,
         request: Request,
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
-    ) -> ProjectGithubSyncResponse:
+    ) -> list[ProjectGithubSyncResultResponse]:
         project, _share = await self._get_or_404(session, actor, project_id)
         if not projects_service.can_manage_github(actor, project):
             raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
-        try:
-            result = await github_sync_service.sync_to_github(session, project)
-        except GitHubNotConfiguredError:
-            raise HTTPException(status_code=409, detail="GitHub is not configured for this project")
-        except InvalidRepoUrlError:
-            raise HTTPException(status_code=422, detail="Not a valid GitHub repository URL")
-        except GitHubAuthError as exc:
+        results = await github_sync_service.sync_all_for_project(session, project_id)
+        for result in results:
             await audit_service.record_user_action(
                 session, actor, request,
-                action="project.github_sync", object_type="project", object_id=project.id,
-                object_label=project.name, project_id=project.id,
-                success=False, detail=str(exc),
+                action="github_sync_target.sync", object_type="project_github_sync",
+                object_id=result["target_id"], object_label=result["name"], project_id=project.id,
+                success=result["success"], detail=result["error"] or _summarize(result),
             )
-            raise HTTPException(status_code=502, detail=f"GitHub authentication failed: {exc}")
-
-        detail = (
-            f"{result['secrets_synced']} secret(s), {result['variables_synced']} variable(s) across "
-            f"{result['environments_synced']} environment(s)"
-            + (f"; {len(result['failures'])} failure(s)" if result["failures"] else "")
-        )
-        await audit_service.record_user_action(
-            session, actor, request,
-            action="project.github_sync", object_type="project", object_id=project.id,
-            object_label=project.name, project_id=project.id,
-            success=not result["failures"], detail=detail,
-        )
-        return ProjectGithubSyncResponse(**result)
+        return [_to_result_response(r) for r in results]
 
 
 router = ProjectRouter()

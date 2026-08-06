@@ -28,13 +28,13 @@
     a dotfile shows once "all files" (not an extension filter) is in effect.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input, label,
     select, table, popover, checkbox, alert-dialog, dialog, skeleton)
-  @version: 5.0.0
+  @version: 5.1.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-06
 -->
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
-import { PhArrowLeft, PhEye, PhEyeSlash, PhGear, PhPencilSimple, PhPlus, PhTrash, PhUpload } from '@phosphor-icons/vue';
+import { PhArrowLeft, PhEye, PhEyeSlash, PhGear, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { parseEnvFile } from '../lib/envFile';
@@ -81,13 +81,20 @@ async function loadAll() {
 }
 onMounted(loadAll);
 
-// ── Environment filter ──────────────────────────────────────────────────
+// ── Environment filter + key-name search ─────────────────────────────────
 const filterEnvironmentId = ref('all');
-const filteredKeys = computed(() =>
-  filterEnvironmentId.value === 'all'
-    ? keys.value
-    : keys.value.filter((k) => k.environment_id === filterEnvironmentId.value)
-);
+const keySearch = ref('');
+const filteredKeys = computed(() => {
+  let result = keys.value;
+  if (filterEnvironmentId.value !== 'all') {
+    result = result.filter((k) => k.environment_id === filterEnvironmentId.value);
+  }
+  const q = keySearch.value.trim().toLowerCase();
+  if (q) {
+    result = result.filter((k) => k.name.toLowerCase().includes(q));
+  }
+  return result;
+});
 
 // ── New secret key ───────────────────────────────────────────────────────
 const showKeyForm = ref(false);
@@ -288,6 +295,10 @@ async function saveValue() {
       <div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
         <h2 class="font-semibold">Secrets</h2>
         <div class="flex items-center gap-2">
+          <div class="relative">
+            <PhMagnifyingGlass :size="14" weight="bold" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input v-model="keySearch" placeholder="Search keys…" class="h-8 w-40 pl-7" />
+          </div>
           <Select v-model="filterEnvironmentId">
             <SelectTrigger size="sm" class="w-40"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -350,7 +361,7 @@ async function saveValue() {
 
       <Card v-if="!filteredKeys.length">
         <CardContent class="p-10 text-center text-muted-foreground text-sm">
-          {{ keys.length ? 'No keys in this environment.' : 'No keys yet.' }}
+          {{ !keys.length ? 'No keys yet.' : keySearch.trim() ? `No keys match "${keySearch.trim()}".` : 'No keys in this environment.' }}
         </CardContent>
       </Card>
 

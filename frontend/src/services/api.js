@@ -6,7 +6,7 @@
 //   module-level lock (_refreshPromise) prevents concurrent refresh races when multiple in-flight
 //   requests all 401 at the same time. Mirrors Satellite's services/api.js request/parseResponse
 //   shape, with thin per-route helpers for projects/environments/secrets/access keys.
-// @version: 2.1.0
+// @version: 2.2.0
 // @author: Marc Fiedler <marc@snakenet.org>
 // @date: 2026-08-06
 import { useAuth } from '../composables/useAuth';
@@ -83,10 +83,17 @@ export const createProject = (payload) => request('POST', '/api/v1/project/', pa
 export const updateProject = (id, payload) => request('PATCH', `/api/v1/project/${id}`, payload);
 export const deleteProject = (id) => request('DELETE', `/api/v1/project/${id}`);
 
-// ── GitHub sync ──────────────────────────────────────────────────────────
-export const updateProjectGithub = (id, payload) => request('PATCH', `/api/v1/project/${id}/github`, payload);
-export const disconnectProjectGithub = (id) => request('DELETE', `/api/v1/project/${id}/github`);
-export const syncProjectGithub = (id) => request('POST', `/api/v1/project/${id}/github/sync`);
+// ── GitHub sync (a Project may have many simultaneous sync targets) ────────
+export const listGithubTargets = (id) => request('GET', `/api/v1/project/${id}/github/targets`);
+export const createGithubTarget = (id, payload) =>
+  request('POST', `/api/v1/project/${id}/github/targets`, payload);
+export const updateGithubTarget = (id, targetId, payload) =>
+  request('PATCH', `/api/v1/project/${id}/github/targets/${targetId}`, payload);
+export const deleteGithubTarget = (id, targetId) =>
+  request('DELETE', `/api/v1/project/${id}/github/targets/${targetId}`);
+export const syncGithubTarget = (id, targetId) =>
+  request('POST', `/api/v1/project/${id}/github/targets/${targetId}/sync`);
+export const syncGithubAll = (id) => request('POST', `/api/v1/project/${id}/github/sync`);
 
 // ── Sharing ───────────────────────────────────────────────────────────────
 export const listShares = (projectId) => request('GET', `/api/v1/project/${projectId}/shares`);

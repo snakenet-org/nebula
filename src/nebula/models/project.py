@@ -4,10 +4,13 @@
 @ai-context: ProjectResponse.my_role tells the frontend which actions to show without it having to
   re-derive permissions client-side — "owner"/"admin" (full access), "editor" (can edit content, not
   sharing/access-keys/delete/reveal), "viewer" (read-only, masked values only) — see nebula.projects
-  for the actual can_view/can_edit/can_reveal/... logic this is computed from. github_connected is
-  derived (nebula.github_sync.has_github_config) — the PAT itself never appears in any response, see
-  ProjectGithubConfigRequest.
-@version: 2.0.0
+  for the actual can_view/can_edit/can_reveal/... logic this is computed from. Since the 2026-08-06
+  multi-repo GitHub sync redesign, a Project's GitHub config is no longer embedded in ProjectResponse
+  (it was a single repo_url/connected pair before) — it's now a separate list of
+  ProjectGithubSyncResponse rows, fetched the same way shares/access-keys already are (see
+  api/v1/project.py's /github/targets routes). The PAT itself never appears in any response, see
+  ProjectGithubSyncCreateRequest/ProjectGithubSyncUpdateRequest.
+@version: 3.0.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-06
 """
@@ -43,18 +46,42 @@ class ProjectResponse(BaseModel):
     updated_at: datetime
     my_role: MyRole
     secret_key_count: int
-    github_repo_url: str | None
-    github_connected: bool
 
 
-class ProjectGithubConfigRequest(BaseModel):
+class ProjectGithubSyncTargetCreateRequest(BaseModel):
+    repo_url: str
+    pat: str
+    name: str | None = None
+
+
+class ProjectGithubSyncTargetUpdateRequest(BaseModel):
+    name: str | None = None
     repo_url: str | None = None
     # Blank/omitted leaves the currently-stored PAT untouched — see
-    # nebula.github_sync.update_github_config.
+    # nebula.github_sync.update_sync_target.
     pat: str | None = None
+    enabled: bool | None = None
 
 
-class ProjectGithubSyncResponse(BaseModel):
+class ProjectGithubSyncTargetResponse(BaseModel):
+    id: uuid.UUID
+    project_id: uuid.UUID
+    name: str
+    repo_url: str
+    enabled: bool
+    last_synced_at: datetime | None
+    last_sync_success: bool | None
+    last_sync_detail: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ProjectGithubSyncResultResponse(BaseModel):
+    target_id: uuid.UUID
+    name: str
+    repo_url: str
+    success: bool
+    error: str | None
     environments_synced: int
     secrets_synced: int
     variables_synced: int

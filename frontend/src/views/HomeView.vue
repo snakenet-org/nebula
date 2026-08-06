@@ -8,13 +8,13 @@
     Label/Skeleton.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input, label,
     skeleton)
-  @version: 2.0.0
+  @version: 2.1.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-06
 -->
 <script setup>
-import { onMounted, ref } from 'vue';
-import { PhFolderPlus, PhLockKey } from '@phosphor-icons/vue';
+import { computed, onMounted, ref } from 'vue';
+import { PhFolderPlus, PhLockKey, PhMagnifyingGlass } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -31,6 +31,18 @@ const loading = ref(true);
 const showForm = ref(false);
 const creating = ref(false);
 const form = ref({ name: '', description: '' });
+
+// ── Search ────────────────────────────────────────────────────────────────
+// Client-side only — listProjects() already returns the caller's full visible set in one call, so
+// there's no reason to round-trip to the API on every keystroke.
+const search = ref('');
+const filteredProjects = computed(() => {
+  const q = search.value.trim().toLowerCase();
+  if (!q) return projects.value;
+  return projects.value.filter(
+    (p) => p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q)
+  );
+});
 
 async function load() {
   loading.value = true;
@@ -117,26 +129,39 @@ const roleVariant = {
       </CardContent>
     </Card>
 
-    <div v-else class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-      <Card
-        v-for="p in projects"
-        :key="p.id"
-        class="text-left cursor-pointer transition hover:border-primary/40"
-        @click="emit('navigate', `/projects/${p.id}`)"
-      >
-        <CardContent>
-          <div class="flex items-start justify-between gap-2 mb-2">
-            <h2 class="font-semibold">{{ p.name }}</h2>
-            <Badge :variant="roleVariant[p.my_role] || 'default'">{{ p.my_role }}</Badge>
-          </div>
-          <p v-if="p.description" class="text-muted-foreground text-sm mb-3 line-clamp-2">{{ p.description }}</p>
-          <div class="text-muted-foreground text-xs flex gap-3">
-            <span>{{ p.environment_count }} environment{{ p.environment_count === 1 ? '' : 's' }}</span>
-            <span>{{ p.secret_key_count }} key{{ p.secret_key_count === 1 ? '' : 's' }}</span>
-          </div>
-          <div class="text-muted-foreground text-xs mt-2">by {{ p.owner_name }}</div>
+    <template v-else>
+      <div class="relative mb-4 max-w-sm">
+        <PhMagnifyingGlass :size="16" weight="bold" class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input v-model="search" placeholder="Search projects…" class="pl-9" />
+      </div>
+
+      <Card v-if="!filteredProjects.length">
+        <CardContent class="p-10 text-center text-muted-foreground text-sm">
+          No projects match "{{ search }}".
         </CardContent>
       </Card>
-    </div>
+
+      <div v-else class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <Card
+          v-for="p in filteredProjects"
+          :key="p.id"
+          class="text-left cursor-pointer transition hover:border-primary/40"
+          @click="emit('navigate', `/projects/${p.id}`)"
+        >
+          <CardContent>
+            <div class="flex items-start justify-between gap-2 mb-2">
+              <h2 class="font-semibold">{{ p.name }}</h2>
+              <Badge :variant="roleVariant[p.my_role] || 'default'">{{ p.my_role }}</Badge>
+            </div>
+            <p v-if="p.description" class="text-muted-foreground text-sm mb-3 line-clamp-2">{{ p.description }}</p>
+            <div class="text-muted-foreground text-xs flex gap-3">
+              <span>{{ p.environment_count }} environment{{ p.environment_count === 1 ? '' : 's' }}</span>
+              <span>{{ p.secret_key_count }} key{{ p.secret_key_count === 1 ? '' : 's' }}</span>
+            </div>
+            <div class="text-muted-foreground text-xs mt-2">by {{ p.owner_name }}</div>
+          </CardContent>
+        </Card>
+      </div>
+    </template>
   </div>
 </template>

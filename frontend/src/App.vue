@@ -28,7 +28,7 @@
     the button reclaims a full row of vertical space for the page content above it.
   @dependencies: vue, @phosphor-icons/vue, vue-sonner, shadcn-vue (button, tooltip, separator,
     avatar, sonner)
-  @version: 5.0.1
+  @version: 5.0.2
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-06
 -->
@@ -162,7 +162,7 @@ onUnmounted(() => document.removeEventListener('visibilitychange', _handleVisibi
           <PhPassword :size="16" weight="bold" /> Generate password
         </Button>
         <span class="text-xs text-muted-foreground">
-          <template v-if="appConfig.config.version">v{{ appConfig.config.version }}<span class="mx-1.5">|</span></template>Powered by
+          <template v-if="appConfig.config.version"><span class="text-primary font-medium">v{{ appConfig.config.version }}</span><span class="mx-1.5">|</span></template>Powered by
           <a
             href="https://snakeNet.org/"
             target="_blank"
