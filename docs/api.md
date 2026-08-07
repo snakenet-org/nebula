@@ -37,7 +37,7 @@ A special case of (1) — see `POST /auth/login` below. Exists as a fallback bef
 group/user is configured, or for a fully self-hosted deployment that never wires up Authentik at
 all (`NEBULA_OIDC_LOGIN_DISABLED=yes`, the default).
 
-### 3. Project access key (`/vault/secret` only)
+### 3. Project access key (`GET /vault/secret` only)
 
 ```
 Authorization: Bearer nbv_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -147,9 +147,11 @@ or, to write the same value to every Environment the Project currently has:
 | POST | `/{project_id}` | `{"name": "deploy-bot"}` → includes the raw `token` **once**, never again. |
 | DELETE | `/{project_id}/{access_key_id}` | Revokes (soft — the row stays for audit, `revoked: true`). |
 
-## Vault (`/vault`) — project access key required, no human session
+## Vault (`/vault`) — no human session
 
 ### `GET /vault/secret?key=<name>&environment=<name>`
+
+Requires a project access key.
 
 ```
 Authorization: Bearer nbv_...
@@ -162,4 +164,32 @@ enumerate a Project's key names by probing.
 
 ```json
 { "key": "DATABASE_URL", "environment": "production", "value": "postgres://..." }
+```
+
+### `GET /vault/project`
+
+Requires a project access key. Returns the name and description of the Project the presented key
+resolves to.
+
+```
+Authorization: Bearer nbv_...
+X-Nebula-Token: ...
+```
+
+```json
+{ "name": "my-project", "description": "Internal tooling backend" }
+```
+
+### `GET /vault/status`
+
+No project access key — access keys are strictly Project-scoped, and this isn't a Project-scoped
+operation. Requires only `X-Nebula-Token`. A lightweight liveness/version/clock check for a machine
+caller, not audit-logged.
+
+```
+X-Nebula-Token: ...
+```
+
+```json
+{ "version": "2.5.0", "server_time": "2026-08-07T12:00:00Z" }
 ```

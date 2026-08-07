@@ -20,9 +20,9 @@
     naturally as an on/off switch than a selection checkbox.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, select, badge,
     alert-dialog, dialog, switch, input, label, button, skeleton)
-  @version: 4.1.0
+  @version: 4.1.1
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-06
+  @date: 2026-08-07
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
@@ -389,9 +389,9 @@ async function deleteProject() {
           <h2 class="font-semibold mb-3">API access keys</h2>
           <p class="text-muted-foreground text-sm mb-4">
             Grants REST access to every secret in this project via
-            <code class="font-mono">GET /api/v1/vault/secret?project=&environment=&key=</code>,
+            <code class="font-mono">GET /api/v1/vault/secret?environment=&key=</code>,
             authenticated with this key as a bearer token plus the site-wide
-            <code class="font-mono">X-Nebula-Token</code>. All three names must match exactly
+            <code class="font-mono">X-Nebula-Token</code>. Both names must match exactly
             (case-insensitively) and may only contain letters, numbers, hyphens, and underscores.
           </p>
 
