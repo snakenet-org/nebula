@@ -1,17 +1,19 @@
 <!--
-  @ai-purpose: Dashboard — the new home/start page. Stat cards + daily extraction/failure charts.
+  @ai-purpose: Dashboard — the new home/start page. Stat cards + daily API-request/extraction/
+    failure charts.
   @ai-context: Counts (nebula.dashboard.summary_counts) are system-wide, not scoped to the caller's
     own Projects — see that module's docstring. Three single-series charts (never one dual-axis
-    chart — different metrics, different scales): API extractions (Project access keys hitting
-    GET /api/v1/vault/secret successfully), frontend extractions (a logged-in human's successful
-    secret.reveal), and failed retrievals (the same vault.py route's success=False rows — this is
-    also exactly what the Audit Logs page's "Failed retrievals" tab lists row-by-row). Every
-    authenticated user sees this page; project browsing moved to its own /projects route
-    (HomeView.vue, unchanged) now that / is the Dashboard.
+    chart — different metrics, different scales): API requests (EVERY call to ANY api/v1/vault.py
+    route — /secret, /project, /status — by a Project access key, success or not, renamed from
+    "API extractions" 2026-08-07 to reflect that it's no longer /secret-only), frontend extractions
+    (a logged-in human's successful secret.reveal), and failed attempts (the same vault.py routes'
+    success=False rows, across all three — this is also exactly what the Audit Logs page's "Failed
+    retrievals" tab lists row-by-row). Every authenticated user sees this page; project browsing
+    moved to its own /projects route (HomeView.vue, unchanged) now that / is the Dashboard.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, skeleton)
-  @version: 1.0.0
+  @version: 1.1.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-06
+  @date: 2026-08-07
 -->
 <script setup>
 import { computed, onMounted, ref } from 'vue';
@@ -44,9 +46,9 @@ function toPoints(dict) {
     .map(([date, value]) => ({ date, value }));
 }
 
-const apiPoints = computed(() => toPoints(series.value?.api_extractions));
+const apiPoints = computed(() => toPoints(series.value?.api_requests));
 const frontendPoints = computed(() => toPoints(series.value?.frontend_extractions));
-const failedPoints = computed(() => toPoints(series.value?.failed_retrievals));
+const failedPoints = computed(() => toPoints(series.value?.failed_attempts));
 
 const cards = computed(() => [
   { label: 'Environments', value: summary.value?.environment_count ?? 0, icon: PhStack },
@@ -90,7 +92,7 @@ const cards = computed(() => [
       <div class="grid lg:grid-cols-3 gap-4">
         <Card>
           <CardContent>
-            <h2 class="font-semibold text-sm mb-3">Secrets extracted via API / day</h2>
+            <h2 class="font-semibold text-sm mb-3">API requests / day</h2>
             <DailyLineChart :points="apiPoints" color="#6fd0ff" />
           </CardContent>
         </Card>
@@ -103,7 +105,7 @@ const cards = computed(() => [
         <Card>
           <CardContent>
             <h2 class="font-semibold text-sm mb-3 flex items-center gap-1.5">
-              <PhWarning :size="14" weight="bold" class="text-destructive" /> Failed retrieval attempts / day
+              <PhWarning :size="14" weight="bold" class="text-destructive" /> Failed attempts / day
             </h2>
             <DailyLineChart :points="failedPoints" color="#fb7185" />
           </CardContent>

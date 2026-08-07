@@ -4,7 +4,7 @@ Base path for every route below: `/api/v1`. All request/response bodies are JSON
 
 ## Authentication
 
-Every route in this API — including the public ones — requires the header:
+Every route in this API — **except the `/vault/*` routes below** — requires the header:
 
 ```
 X-Nebula-Token: <NEBULA_TOKEN>
@@ -13,7 +13,8 @@ X-Nebula-Token: <NEBULA_TOKEN>
 a site-wide shared secret set once when the container is spawned. It's the coarse "is this caller
 even allowed to talk to this Nebula Vault instance" gate, checked before anything else. The public
 routes (`/health`, `/ping`, `/config`, `/auth/*`) skip every *other* gate but still require this
-header.
+header. The `/vault/*` routes (`/vault/secret`, `/vault/project`, `/vault/status`) are the one
+exception — they never require `X-Nebula-Token`, only a project access key (see below).
 
 Beyond that, three distinct credential kinds exist, and a route uses exactly one:
 
@@ -37,7 +38,7 @@ A special case of (1) — see `POST /auth/login` below. Exists as a fallback bef
 group/user is configured, or for a fully self-hosted deployment that never wires up Authentik at
 all (`NEBULA_OIDC_LOGIN_DISABLED=yes`, the default).
 
-### 3. Project access key (`GET /vault/secret` only)
+### 3. Project access key (`GET /vault/*` only)
 
 ```
 Authorization: Bearer nbv_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -45,7 +46,9 @@ Authorization: Bearer nbv_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 A long-lived, Project-scoped credential generated from the UI (Project → Settings → API access
 keys). Identifies *which Project*, not *which user* — meant for scripts/CI/containers pulling
-secrets at deploy time, not for a human session.
+secrets at deploy time, not for a human session. Required on **all three** `/vault/*` routes,
+including `/vault/status` — a plain liveness check still needs to present a valid key, it's just
+never scoped to the Project it happens to resolve.
 
 ---
 
@@ -147,15 +150,17 @@ or, to write the same value to every Environment the Project currently has:
 | POST | `/{project_id}` | `{"name": "deploy-bot"}` → includes the raw `token` **once**, never again. |
 | DELETE | `/{project_id}/{access_key_id}` | Revokes (soft — the row stays for audit, `revoked: true`). |
 
-## Vault (`/vault`) — no human session
+## Vault (`/vault`) — no human session, no X-Nebula-Token
+
+Every route below requires only a project access key (no `X-Nebula-Token`, no human JWT) — and
+every call, success or failure, is audit-logged (`nebula.audit`, actions `vault.retrieve` /
+`vault.project` / `vault.status`) and rolled up into the Dashboard's "API requests / day" and
+"Failed attempts / day" charts.
 
 ### `GET /vault/secret?key=<name>&environment=<name>`
 
-Requires a project access key.
-
 ```
 Authorization: Bearer nbv_...
-X-Nebula-Token: ...
 ```
 
 Case-insensitive match on both `key` and `environment`. Any lookup failure — unknown key, unknown
@@ -168,12 +173,10 @@ enumerate a Project's key names by probing.
 
 ### `GET /vault/project`
 
-Requires a project access key. Returns the name and description of the Project the presented key
-resolves to.
+Returns the name and description of the Project the presented key resolves to.
 
 ```
 Authorization: Bearer nbv_...
-X-Nebula-Token: ...
 ```
 
 ```json
@@ -182,12 +185,11 @@ X-Nebula-Token: ...
 
 ### `GET /vault/status`
 
-No project access key — access keys are strictly Project-scoped, and this isn't a Project-scoped
-operation. Requires only `X-Nebula-Token`. A lightweight liveness/version/clock check for a machine
-caller, not audit-logged.
+A lightweight liveness/version/clock check for a machine caller. Still requires a project access
+key — it's a credential check only, the response carries nothing Project-specific.
 
 ```
-X-Nebula-Token: ...
+Authorization: Bearer nbv_...
 ```
 
 ```json

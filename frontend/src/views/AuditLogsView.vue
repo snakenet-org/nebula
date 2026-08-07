@@ -2,16 +2,17 @@
   @ai-purpose: Admin-only Audit Logs page — every mutating action taken through Nebula.
   @ai-context: Three tabs, mirroring nebula.audit's three query helpers: "Activity" (logged-in
     humans — project/environment/secret CRUD, sharing, access keys, login/logout, reveal),
-    "API calls" (Project access keys hitting GET /api/v1/vault/secret — every attempt, success or
-    not), "Failed retrievals" (the success=False subset of API calls — the same rows the Dashboard's
-    failed-retrieval chart counts, shown here as a readable list instead of a chart). The page itself
-    is reachable from the sidebar only for an admin (App.vue) and every /api/v1/audit/* route 403s a
-    non-admin server-side too — this view does no client-side gating beyond simply not rendering for
-    a non-admin caller (the parent already hides the nav entry).
+    "API calls" (Project access keys hitting ANY api/v1/vault.py route — /secret, /project,
+    /status, see nebula.audit.VAULT_ACTIONS — every attempt, success or not), "Failed retrievals"
+    (the success=False subset of API calls, across all three vault routes — the same rows the
+    Dashboard's "Failed attempts / day" chart counts, shown here as a readable list instead of a
+    chart). The page itself is reachable from the sidebar only for an admin (App.vue) and every
+    /api/v1/audit/* route 403s a non-admin server-side too — this view does no client-side gating
+    beyond simply not rendering for a non-admin caller (the parent already hides the nav entry).
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, badge, tabs, skeleton)
-  @version: 1.0.0
+  @version: 1.0.1
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-06
+  @date: 2026-08-07
 -->
 <script setup>
 import { onMounted, ref } from 'vue';

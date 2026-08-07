@@ -9,12 +9,12 @@
   - Bump `version` together with pyproject.toml's [project] version on every release-worthy change.
   - Maintain 100% type-hinting coverage.
 @dependencies: (none)
-@version: 2.9.0
+@version: 2.10.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-07
 """
 
-version = "2.9.0"
+version = "2.10.0"
 
 
 def main() -> None:
