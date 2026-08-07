@@ -9,18 +9,21 @@
   key's `value` IS included directly in SecretKeyResponse (decrypted server-side in api/v1/secret.py's
   `_to_response`) since it isn't meant to be anonymized — still encrypted at rest identically to a
   secret (see nebula.crypto), the distinction is purely a frontend display/reveal-gating rule, not an
-  encryption one.
-@version: 3.2.0
+  encryption one. `name` (SecretKeyCreateRequest/SecretKeyUpdateRequest/SecretBulkItem) is restricted
+  to nebula.naming's letters/digits/hyphen/underscore charset — see that module for why (a key is one
+  of the three identifiers api/v1/vault.py's external route addresses by name).
+@version: 3.3.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-08-07
 """
 
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from nebula.models.tables import VariableType
+from nebula.naming import validate_name
 
 
 class SecretKeyCreateRequest(BaseModel):
@@ -29,11 +32,15 @@ class SecretKeyCreateRequest(BaseModel):
     environment_id: uuid.UUID
     variable_type: VariableType = VariableType.SECRET
 
+    _validate_name = field_validator("name")(validate_name)
+
 
 class SecretBulkItem(BaseModel):
     name: str
     value: str
     variable_type: VariableType = VariableType.SECRET
+
+    _validate_name = field_validator("name")(validate_name)
 
 
 class SecretBulkCreateRequest(BaseModel):
@@ -55,6 +62,11 @@ class SecretKeyUpdateRequest(BaseModel):
     description: str | None = None
     environment_id: uuid.UUID | None = None
     variable_type: VariableType | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str | None) -> str | None:
+        return value if value is None else validate_name(value)
 
 
 class SecretKeyResponse(BaseModel):

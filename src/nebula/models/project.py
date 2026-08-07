@@ -9,19 +9,23 @@
   (it was a single repo_url/connected pair before) — it's now a separate list of
   ProjectGithubSyncResponse rows, fetched the same way shares/access-keys already are (see
   api/v1/project.py's /github/targets routes). The PAT itself never appears in any response, see
-  ProjectGithubSyncCreateRequest/ProjectGithubSyncUpdateRequest.
-@version: 3.0.0
+  ProjectGithubSyncCreateRequest/ProjectGithubSyncUpdateRequest. `name` (Create/UpdateRequest) is
+  restricted to nebula.naming's letters/digits/hyphen/underscore charset — see that module for why
+  (a Project name is one of the three identifiers api/v1/vault.py's external route addresses by
+  name).
+@version: 3.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-08-07
 """
 
 import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from nebula.models.tables import ShareRole
+from nebula.naming import validate_name
 
 MyRole = Literal["owner", "admin", "editor", "viewer"]
 
@@ -30,10 +34,17 @@ class ProjectCreateRequest(BaseModel):
     name: str
     description: str | None = None
 
+    _validate_name = field_validator("name")(validate_name)
+
 
 class ProjectUpdateRequest(BaseModel):
     name: str | None = None
     description: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _validate_name(cls, value: str | None) -> str | None:
+        return value if value is None else validate_name(value)
 
 
 class ProjectResponse(BaseModel):

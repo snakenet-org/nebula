@@ -389,8 +389,10 @@ async function deleteProject() {
           <h2 class="font-semibold mb-3">API access keys</h2>
           <p class="text-muted-foreground text-sm mb-4">
             Grants REST access to every secret in this project via
-            <code class="font-mono">GET /api/v1/vault/secret</code>, authenticated with this key as a
-            bearer token plus the site-wide <code class="font-mono">X-Nebula-Token</code>.
+            <code class="font-mono">GET /api/v1/vault/secret?project=&environment=&key=</code>,
+            authenticated with this key as a bearer token plus the site-wide
+            <code class="font-mono">X-Nebula-Token</code>. All three names must match exactly
+            (case-insensitively) and may only contain letters, numbers, hyphens, and underscores.
           </p>
 
           <Card v-if="createdToken" class="mb-4 bg-primary/10 border-primary/30">
