@@ -1,22 +1,3 @@
-#             ++++++++++++
-#         ++++++++      ++++++++
-#      +++++                  +++++
-#     +++         ++++++++       +++++
-#   +++         +++++++++++++      ++++
-#  +++          ++++++++++++        ++++
-#  ++          +++++                +++++
-# +++          ++++++                ++++
-# +++           ++++++               ++++
-# +++            +++++++             ++++
-# +++              ++++++            +++
-#  +++              ++++++          ++++
-#  ++++              ++++++        ++++
-#   ++++              ++++        ++++
-#     +++++         +++++      +++++
-#      +++++++++++++++++     +++++
-#        ++++++++++++++   ++++++
-#             +++++   ++++++
-#
 #   (c) snakeNet.org, All rights reserved
 #       Nebula Vault: self-hosted secrets manager
 #
@@ -37,27 +18,24 @@ on:
 jobs:
   build-nebula:
     runs-on: ubuntu-latest
-    environment: main
+    environment: prod
     env:
       PUBLISHER: snakeNet
       MODULE: nebula
       NAME: Nebula Vault
 
-      REGISTRY_HOST: ${{ vars.REGISTRY_HOST }}
-      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
       GITHUB_TOKEN: ${{ secrets.GIT_PAT }}
     steps:
         - name: Checking out code...
           uses: actions/checkout@v5
         - run: echo "${{ github.repository }} repository has been cloned to the runner."
 
-        - name: Login to snakeNet Container Registry
+        - name: Login to GitHub Container Registry
           uses: docker/login-action@v4
           with:
-            registry: ${{ env.REGISTRY_HOST }}
-            username: ${{ env.REGISTRY_USERNAME }}
-            password: ${{ env.REGISTRY_PASSWORD }}
+            registry: ghcr.io
+            username: ${{ github.actor }}
+            password: ${{ secrets.GITHUB_TOKEN }}
 
         - name: Set up Docker Buildx
           uses: docker/setup-buildx-action@v3
@@ -72,20 +50,12 @@ jobs:
           with:
             context: .
             file: ./Dockerfile
-            platforms: linux/amd64,linux/arm64
+            platforms: linux/amd64
             push: true
             tags: |
-              ${{ env.REGISTRY_HOST }}/${{ env.MODULE }}:${{ github.ref_name }}
-              ${{ env.REGISTRY_HOST }}/${{ env.MODULE }}:latest
+              ghcr.io/${{ github.actor }}/${{ env.MODULE }}:${{ github.ref_name }}
+              ghcr.io/${{ github.actor }}/${{ env.MODULE }}:latest
             labels: |
-              org.opencontainers.image.title=${{ env.MODULE }}
-              org.opencontainers.image.description=Nebula Vault, a self-hosted secrets manager
               org.opencontainers.image.revision=${{ github.sha }}
               org.opencontainers.image.vendor=snakeNet.org
               org.opencontainers.image.url=https://snakeNet.org/
-            build-args: |
-              GITHUB_TOKEN=${{ env.GITHUB_TOKEN }}
-
-        # TODO: once Nebula Vault is registered in Gravity/Satellite with real secrets, add the
-        # snakenet-org/gravity-push (deploy notification) and/or snakenet-org/satellite-deploy
-        # (auto-deploy) steps here, mirroring apps/satellite/.github/workflows/build.yml.
