@@ -26,11 +26,28 @@
     user could browse into a folder but never actually select the `.env` file inside it. Dropping
     `accept` entirely restores the native "All Files" option, matching macOS Finder's convention that
     a dotfile shows once "all files" (not an extension filter) is in effect.
+    The create-key form now also takes an optional Value (2026-08-07) so a key can be fully set up
+    (name/description/environment/type/value) in one submit instead of a create-then-set-value round
+    trip — still entirely optional, a blank value creates the key exactly as before. Renaming a key
+    is a small Dialog (openRenameDialog/saveRename) separate from the environment-reassignment
+    Select and the value-editor Popover. Both the delete-key AlertDialog and this rename Dialog fixed
+    a real bug this session: every AlertDialog target ref in this file used to be nulled by the
+    dialog's own `@update:open` handler, which raced against AlertDialogAction's built-in
+    auto-close (reka-ui's DialogClose calls `rootContext.onOpenChange(false)` unconditionally on
+    click, with no way to defer it) — when that internal handler ran before this component's own
+    `@click` listener on the same click event, the target was already null by the time the delete
+    handler read it, so its guard silently no-opped with zero API call ever sent. Fixed by splitting
+    "which target is this dialog for" (confirmDeleteKey, set once on open, never auto-cleared) from
+    "is the dialog open" (deleteKeyDialogOpen, freely toggled by reka-ui) — see the code comment by
+    confirmDeleteKey's declaration for the full trace. Caught via a real headless-browser repro (not
+    code review): a Playwright pass that created a throwaway key and clicked through the confirm
+    dialog showed the dialog closing with zero `DELETE /api/v1/secret/...` request ever leaving the
+    browser.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input, label,
     select, table, popover, checkbox, alert-dialog, dialog, skeleton)
-  @version: 5.1.0
+  @version: 6.0.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-06
+  @date: 2026-08-07
 -->
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
@@ -98,7 +115,8 @@ const filteredKeys = computed(() => {
 
 // ── New secret key ───────────────────────────────────────────────────────
 const showKeyForm = ref(false);
-const newKey = ref({ name: '', description: '', environment_id: '', variable_type: 'secret' });
+const emptyNewKey = () => ({ name: '', description: '', environment_id: '', variable_type: 'secret', value: '' });
+const newKey = ref(emptyNewKey());
 const savingKey = ref(false);
 async function addKey() {
   if (!newKey.value.name.trim() || !newKey.value.environment_id) return;
@@ -109,9 +127,10 @@ async function addKey() {
       description: newKey.value.description.trim() || null,
       environment_id: newKey.value.environment_id,
       variable_type: newKey.value.variable_type,
+      value: newKey.value.value || null,
     });
     keys.value.push(key);
-    newKey.value = { name: '', description: '', environment_id: '', variable_type: 'secret' };
+    newKey.value = emptyNewKey();
     showKeyForm.value = false;
   } catch (e) {
     toast.error(e.message);
@@ -202,16 +221,62 @@ async function reassignEnvironment(key, environmentId) {
   }
 }
 
+// `confirmDeleteKey` holds ONLY the target being confirmed — it is never cleared by the dialog's
+// own close machinery (see deleteKeyDialogOpen below), just set on open and read by deleteKey().
+// AlertDialogAction closes the dialog itself on click (reka-ui's DialogClose fires
+// rootContext.onOpenChange(false) unconditionally, with no event.preventDefault escape hatch — see
+// node_modules/reka-ui/src/Dialog/DialogClose.vue), and Vue may run that internal handler BEFORE
+// this component's own @click="deleteKey" listener on the same click event. Previously both the
+// dialog's open state AND the delete target lived in the same `confirmDeleteKey` ref, nulled by
+// `@update:open` — so a click order where the internal close fired first nulled the target before
+// deleteKey() ever read it, and its `if (!confirmDeleteKey.value) return` guard silently no-opped
+// with zero API call. Splitting the target ref from the open boolean makes the fix independent of
+// listener order entirely. Applied to every AlertDialog target in this file/ProjectSettingsView.vue.
 const confirmDeleteKey = ref(null);
+const deleteKeyDialogOpen = ref(false);
+function openDeleteKeyDialog(key) {
+  confirmDeleteKey.value = key;
+  deleteKeyDialogOpen.value = true;
+}
 async function deleteKey() {
-  if (!confirmDeleteKey.value) return;
+  const target = confirmDeleteKey.value;
+  if (!target) return;
   try {
-    await api.deleteSecret(props.projectId, confirmDeleteKey.value.id);
-    keys.value = keys.value.filter((k) => k.id !== confirmDeleteKey.value.id);
-    confirmDeleteKey.value = null;
+    await api.deleteSecret(props.projectId, target.id);
+    keys.value = keys.value.filter((k) => k.id !== target.id);
     toast.success('Key deleted.');
   } catch (e) {
     toast.error(e.message);
+  } finally {
+    deleteKeyDialogOpen.value = false;
+  }
+}
+
+// ── Rename key ────────────────────────────────────────────────────────────
+const renameDialogOpen = ref(false);
+const renameTargetKey = ref(null);
+const renameValue = ref('');
+const renamingKey = ref(false);
+function openRenameDialog(key) {
+  renameTargetKey.value = key;
+  renameValue.value = key.name;
+  renameDialogOpen.value = true;
+}
+async function saveRename() {
+  const target = renameTargetKey.value;
+  const name = renameValue.value.trim();
+  if (!target || !name) return;
+  renamingKey.value = true;
+  try {
+    const updated = await api.updateSecret(props.projectId, target.id, { name });
+    const idx = keys.value.findIndex((k) => k.id === updated.id);
+    if (idx !== -1) keys.value[idx] = updated;
+    toast.success('Key renamed.');
+    renameDialogOpen.value = false;
+  } catch (e) {
+    toast.error(e.message);
+  } finally {
+    renamingKey.value = false;
   }
 }
 
@@ -351,6 +416,10 @@ async function saveValue() {
                 </SelectContent>
               </Select>
             </div>
+            <div class="sm:col-span-2 lg:col-span-4 space-y-1.5">
+              <Label for="new-key-value">Value (optional)</Label>
+              <Input id="new-key-value" v-model="newKey.value" placeholder="Leave blank to set a value later" class="font-mono" />
+            </div>
             <div class="sm:col-span-2 lg:col-span-4 flex gap-2 justify-end">
               <Button type="button" variant="outline" @click="showKeyForm = false">Cancel</Button>
               <Button type="submit" :disabled="savingKey || !newKey.environment_id">Create</Button>
@@ -383,6 +452,9 @@ async function saveValue() {
                   <Badge :variant="key.variable_type === 'secret' ? 'warning' : 'info'" class="text-[0.65rem] px-1.5 py-0">
                     {{ key.variable_type === 'secret' ? 'secret' : 'env var' }}
                   </Badge>
+                  <Button v-if="canEdit" variant="ghost" size="icon-xs" title="Rename key" @click="openRenameDialog(key)">
+                    <PhPencilSimple :size="12" weight="bold" />
+                  </Button>
                 </div>
                 <div v-if="key.description" class="text-muted-foreground text-xs mt-0.5">{{ key.description }}</div>
               </TableCell>
@@ -442,7 +514,7 @@ async function saveValue() {
                 </div>
               </TableCell>
               <TableCell class="align-top text-right">
-                <Button v-if="canEdit" variant="ghost" size="icon-xs" title="Delete key" @click="confirmDeleteKey = key">
+                <Button v-if="canEdit" variant="ghost" size="icon-xs" title="Delete key" @click="openDeleteKeyDialog(key)">
                   <PhTrash :size="13" weight="bold" />
                 </Button>
               </TableCell>
@@ -520,7 +592,7 @@ async function saveValue() {
       </DialogContent>
     </Dialog>
 
-    <AlertDialog :open="!!confirmDeleteKey" @update:open="(v) => !v && (confirmDeleteKey = null)">
+    <AlertDialog :open="deleteKeyDialogOpen" @update:open="(v) => (deleteKeyDialogOpen = v)">
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete this key?</AlertDialogTitle>
@@ -534,5 +606,24 @@ async function saveValue() {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+
+    <Dialog :open="renameDialogOpen" @update:open="(v) => (renameDialogOpen = v)">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Rename key</DialogTitle>
+          <DialogDescription>References to '{{ renameTargetKey?.name }}' by name (e.g. external API lookups) must be updated separately.</DialogDescription>
+        </DialogHeader>
+        <form @submit.prevent="saveRename" class="space-y-3">
+          <div class="space-y-1.5">
+            <Label for="rename-key-name">Name</Label>
+            <Input id="rename-key-name" v-model="renameValue" required class="uppercase font-mono" />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" @click="renameDialogOpen = false">Cancel</Button>
+            <Button type="submit" :disabled="renamingKey || !renameValue.trim()">Save</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

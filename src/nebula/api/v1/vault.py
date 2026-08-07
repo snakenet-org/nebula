@@ -1,15 +1,20 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: GET /api/v1/vault/secret + GET /api/v1/vault/project (both project-access-key
-  authenticated) + GET /api/v1/vault/status (X-Nebula-Token only) — the external,
-  machine-to-machine surface.
-@ai-context: /secret is a THIRD auth mode alongside human-JWT (project.py/secret.py/...) and the
-  public no-credential routes (health/ping/config/auth) — a spawned container pulls its own secrets
-  at deploy time by presenting a project access key, not a user session. Still requires
-  X-Nebula-Token (every API call does, per spec) — added as an explicit router-level dependency
-  since this router is constructed with public=True to skip Endpoint's normal JWT gate. The bearer
-  credential is a ProjectAccessKey token (nebula.access_keys.resolve_access_key), not a JWT — no
-  relation to get_current_user/get_jwt_claims at all.
+@ai-purpose: GET /api/v1/vault/secret + GET /api/v1/vault/project + GET /api/v1/vault/status — the
+  external, machine-to-machine surface. ALL THREE are gated on a project access key alone, no
+  X-Nebula-Token.
+@ai-context: This whole router is a THIRD auth mode alongside human-JWT (project.py/secret.py/...)
+  and the public no-credential routes (health/ping/config/auth) — a spawned container pulls its own
+  secrets at deploy time by presenting a project access key, not a user session or the shared
+  X-Nebula-Token service secret. Constructed with public=True (skips Endpoint's normal
+  X-Nebula-Token + JWT gates) and deliberately adds NEITHER back — every route here gates on
+  `get_access_key` alone (a ProjectAccessKey bearer token, nebula.access_keys.resolve_access_key,
+  no relation to get_current_user/get_jwt_claims at all). X-Nebula-Token used to be required on top
+  of that for /secret and /project, and was the ONLY gate on /status — both dropped per explicit
+  product direction: a caller presenting a valid project access key has already proven it holds a
+  real, live credential for this instance, so the extra shared secret added no real boundary here,
+  only friction for machine callers. Every other router in this API (project/environment/secret/
+  access_key/audit/dashboard/auth) is UNCHANGED — X-Nebula-Token is still required there.
   /secret takes only `environment` + `key` as query params — the Project itself is never a query
   param, since the presented access key already resolves to exactly one Project
   (nebula.access_keys.resolve_access_key); a caller has no separate "which project" value to pass
@@ -23,28 +28,29 @@
   miss (unknown key, wrong environment, or no value set for that pair) is a 404 — never
   distinguished from each other in the response, so a caller can't enumerate a project's key names
   by probing.
-  Every /secret call is audit-logged (nebula.audit.record_access_key_action, action="vault.retrieve")
-  once the presented access key itself resolves — success and every 404 both get a row
-  (success=False for the 404s), backing the Audit Logs page's "API calls"/"Failed retrievals" tabs
-  and the Dashboard's daily extraction/failed-retrieval charts. A wholly invalid/revoked access key
-  (get_access_key's own 401) is NOT logged here — an auth failure, not a retrieval attempt, with no
-  resolved actor to attribute it to.
-  GET /status deliberately takes NO project access key — access keys are strictly Project-scoped
-  credentials, and a liveness/version/clock check isn't a Project-scoped operation, so gating it on
-  one would be the wrong trust boundary. Auth is X-Nebula-Token alone (the router-level dependency
-  every route here already has); status reveals nothing project-specific anyway, and is NOT
-  audit-logged (mirrors health.py/ping.py's own unaudited liveness checks — this isn't a secret
-  retrieval, and there'd be no resolved access key to attribute it to regardless).
-  GET /project takes only the access key (+ X-Nebula-Token) — same shape as /secret minus the
-  environment/key query params — and returns the resolved Project's name + description. No lookup
-  miss is possible here (the access key already resolved to exactly one Project via
-  get_access_key's own 401 gate), so unlike /secret there's only ever a single, success=True audit
-  row (action="vault.project", object_type="project") — never a 404/failure branch to log.
+  EVERY call to EVERY route in this router is now audit-logged (nebula.audit.record_access_key_action,
+  actions "vault.retrieve"/"vault.project"/"vault.status", see nebula.audit.VAULT_ACTIONS) once the
+  presented access key itself resolves — success and every non-200 response both get a row
+  (success=False for the latter), backing the Audit Logs page's "API calls"/"Failed retrievals" tabs
+  and the Dashboard's "API requests / day" / "Failed attempts / day" charts (nebula.dashboard —
+  counts across ALL THREE actions, not just vault.retrieve). A wholly invalid/revoked access key
+  (get_access_key's own 401) is NOT logged here — an auth failure, not a request against a resolved
+  Project, with no resolved actor to attribute it to.
+  GET /status now REQUIRES a project access key too (previously the one route with no access-key
+  gate at all — X-Nebula-Token alone was enough). It still returns nothing project-specific
+  (`{version, server_time}`) and ignores which Project the key resolves to beyond validating it —
+  the access key here is purely a credential check, not a scoping mechanism — but every call is
+  still logged (action="vault.status") like the other two routes.
+  GET /project takes only the access key — same shape as /secret minus the environment/key query
+  params — and returns the resolved Project's name + description. No lookup miss is possible here
+  (the access key already resolved to exactly one Project via get_access_key's own 401 gate), so
+  unlike /secret there's only ever a single, success=True audit row (action="vault.project",
+  object_type="project") — never a 404/failure branch to log.
 @ai-rules:
   - Never log the resolved plaintext value.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 4.1.0
+@version: 5.0.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-07
 """
@@ -61,7 +67,7 @@ from nebula import audit as audit_service
 from nebula import environments as environments_service
 from nebula import secrets as secrets_service
 from nebula import version
-from nebula.api.endpoint import Endpoint, verify_nebula_token
+from nebula.api.endpoint import Endpoint
 from nebula.database import get_session
 from nebula.models.tables import Project, ProjectAccessKey
 from nebula.models.vault import (
@@ -90,12 +96,10 @@ async def get_access_key(
 
 
 class VaultRouter(Endpoint):
-    """Public router (no JWT gate) — auth is X-Nebula-Token + a project access key instead."""
+    """Public router (no X-Nebula-Token, no JWT gate) — auth is a project access key alone."""
 
     def __init__(self, *args, **kwargs):
-        super().__init__(
-            public=True, dependencies=[Depends(verify_nebula_token)], *args, **kwargs
-        )
+        super().__init__(public=True, *args, **kwargs)
         self.add_api_route(
             "/secret",
             self.get_secret,
@@ -163,7 +167,25 @@ class VaultRouter(Endpoint):
         await _audit(success=True)
         return VaultSecretResponse(key=secret_key.name, environment=env.name, value=value)
 
-    async def get_status(self) -> VaultStatusResponse:
+    async def get_status(
+        self,
+        request: Request,
+        resolved: tuple[Project, ProjectAccessKey] = Depends(get_access_key),
+        session: AsyncSession = Depends(get_session),
+    ) -> VaultStatusResponse:
+        resolved_project, access_key = resolved
+
+        await audit_service.record_access_key_action(
+            session,
+            access_key_id=access_key.id,
+            access_key_label=access_key.name,
+            request=request,
+            action="vault.status",
+            object_type="project",
+            object_label=resolved_project.name,
+            project_id=resolved_project.id,
+            success=True,
+        )
         return VaultStatusResponse(version=version, server_time=datetime.now(timezone.utc))
 
     async def get_project(

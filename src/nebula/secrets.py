@@ -16,15 +16,17 @@
   Project view's "Upload .env" flow — always creates brand-new keys (never updates an existing key's
   value), all-or-nothing in one commit; `variable_type` is per-item (a (name, value, variable_type)
   triple), letting the frontend's review dialog pick secret vs. environment variable per row instead
-  of one type for the whole batch.
+  of one type for the whole batch. create_key's `value` param (added 2026-08-07) is optional — the
+  create form can set an initial value in the same call, encrypted the same way set_value does;
+  omitting it leaves the key valueless exactly as before.
 @ai-rules:
   - Never log a plaintext value.
   - encrypt_value/decrypt_value only — never import `cryptography` directly here.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 2.2.0
+@version: 2.3.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-08-07
 """
 
 import uuid
@@ -98,6 +100,7 @@ async def create_key(
     environment_id: uuid.UUID,
     variable_type: VariableType,
     created_by: uuid.UUID,
+    value: str | None = None,
 ) -> SecretKey:
     key = SecretKey(
         project_id=project_id,
@@ -106,6 +109,8 @@ async def create_key(
         environment_id=environment_id,
         variable_type=variable_type,
         created_by=created_by,
+        ciphertext=encrypt_value(value) if value else None,
+        updated_by=created_by if value else None,
     )
     session.add(key)
     try:

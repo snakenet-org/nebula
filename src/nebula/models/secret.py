@@ -12,7 +12,10 @@
   encryption one. `name` (SecretKeyCreateRequest/SecretKeyUpdateRequest/SecretBulkItem) is restricted
   to nebula.naming's letters/digits/hyphen/underscore charset — see that module for why (a key is one
   of the three identifiers api/v1/vault.py's external route addresses by name).
-@version: 3.3.0
+  SecretKeyCreateRequest.value (added 2026-08-07) is optional — the create form can set an initial
+  value in the same call instead of requiring a separate value-set round trip afterward; omitting it
+  (or sending blank) creates the key with no value yet, exactly as before.
+@version: 3.4.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-07
 """
@@ -31,6 +34,7 @@ class SecretKeyCreateRequest(BaseModel):
     description: str | None = None
     environment_id: uuid.UUID
     variable_type: VariableType = VariableType.SECRET
+    value: str | None = None
 
     _validate_name = field_validator("name")(validate_name)
 

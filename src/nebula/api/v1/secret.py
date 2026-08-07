@@ -10,22 +10,26 @@
   an existing key); one Environment applies to the whole batch, but `variable_type` is per-item
   (SecretBulkItem) so the review dialog can pick secret vs. environment variable per row.
   Since the same-day multi-repo GitHub sync redesign, every route that changes what a value actually
-  IS (update_key, delete_key, set_value, bulk_create_keys — deliberately NOT create_key, which never
-  has a value yet) calls `_auto_sync_github` right after its own commit — this fans out to every
+  IS (update_key, delete_key, set_value, bulk_create_keys, and create_key when a `value` was actually
+  provided — see below) calls `_auto_sync_github` right after its own commit — this fans out to every
   enabled ProjectGithubSync target via nebula.github_sync.sync_all_for_project, so a linked repository
   never goes stale waiting for someone to remember to click "Sync now". This runs synchronously,
   in-request (there is no background task queue in this app), and is fully best-effort: a GitHub
   failure is recorded to the audit log per target but NEVER raised back into the route, so a value
   change always succeeds/responds on its own merits regardless of GitHub's availability.
+  create_key's `payload.value` (added 2026-08-07) is optional — the create form can set an initial
+  value in the same call instead of a separate PUT .../value round trip; `_auto_sync_github` only
+  fires here when a value was actually included, matching every other route's "only sync when a
+  value genuinely changed" rule.
 @ai-rules:
   - Never include SecretKey.ciphertext or a decrypted value in any response except reveal_value's.
   - A GitHub sync failure triggered by _auto_sync_github must never surface as an error response for
     the secret mutation that triggered it — catch broadly, audit-log, and move on.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 4.0.0
+@version: 4.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-08-07
 """
 
 import uuid
@@ -185,6 +189,7 @@ class SecretRouter(Endpoint):
                 environment_id=payload.environment_id,
                 variable_type=payload.variable_type,
                 created_by=actor.id,
+                value=payload.value,
             )
         except DuplicateSecretKeyNameError:
             raise HTTPException(status_code=409, detail="A key with this name already exists")
@@ -193,6 +198,8 @@ class SecretRouter(Endpoint):
             action="secret.create", object_type="secret_key", object_id=row.id,
             object_label=row.name, project_id=project_id,
         )
+        if payload.value:
+            await _auto_sync_github(session, actor, request, project_id)
         return await _to_response(session, row)
 
     async def bulk_create_keys(

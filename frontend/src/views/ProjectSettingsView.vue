@@ -18,9 +18,19 @@
     Checkboxes on ProjectView.vue) — a deliberate distinction: this toggles a persistent, already-
     live setting on save (`toggleTargetEnabled` calls the API immediately on flip), which reads more
     naturally as an on/off switch than a selection checkbox.
+  @ai-rules:
+    - Every AlertDialog's per-item target (confirmRevokeShare/confirmRevokeKey/confirmDeleteTarget)
+      must live in a ref that is ONLY ever set on open and cleared by our own code — never nulled by
+      the dialog's own `@update:open` handler. AlertDialogAction auto-closes unconditionally on
+      click (reka-ui's DialogClose has no event.preventDefault escape hatch) and can run before this
+      component's own @click listener on the same click event; if target-data and open-state shared
+      one ref, that race could null the target before the action handler ever read it, silently
+      no-opping the whole action with zero API call — this is exactly what happened to
+      revokeAccessKey before this file's 2026-08-07 fix (see the code comment above
+      confirmRevokeShare's declaration).
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, select, badge,
     alert-dialog, dialog, switch, input, label, button, skeleton)
-  @version: 4.1.1
+  @version: 4.2.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-07
 -->
@@ -127,16 +137,29 @@ async function changeRole(share, role) {
     toast.error(e.message);
   }
 }
+// `confirmRevokeShare` holds ONLY the target — never cleared by the dialog's own close machinery,
+// only by openRevokeShareDialog/on success. See ProjectView.vue's confirmDeleteKey comment for why:
+// AlertDialogAction auto-closes unconditionally on click (no event.preventDefault escape hatch in
+// reka-ui's DialogClose), which can race ahead of this component's own @click handler on the same
+// click event — if the target and the open-state shared one ref, the target could already be null
+// by the time the handler read it, silently no-opping the whole action.
 const confirmRevokeShare = ref(null);
+const revokeShareDialogOpen = ref(false);
+function openRevokeShareDialog(share) {
+  confirmRevokeShare.value = share;
+  revokeShareDialogOpen.value = true;
+}
 async function revokeShare() {
-  if (!confirmRevokeShare.value) return;
+  const target = confirmRevokeShare.value;
+  if (!target) return;
   try {
-    await api.revokeShare(props.projectId, confirmRevokeShare.value.user_id);
-    shares.value = shares.value.filter((s) => s.user_id !== confirmRevokeShare.value.user_id);
-    confirmRevokeShare.value = null;
+    await api.revokeShare(props.projectId, target.user_id);
+    shares.value = shares.value.filter((s) => s.user_id !== target.user_id);
     toast.success('Access revoked.');
   } catch (e) {
     toast.error(e.message);
+  } finally {
+    revokeShareDialogOpen.value = false;
   }
 }
 
@@ -164,17 +187,25 @@ function copyToken() {
   copied.value = true;
   setTimeout(() => (copied.value = false), 1500);
 }
+// See confirmRevokeShare's comment above — same target/open-state split, same reason.
 const confirmRevokeKey = ref(null);
+const revokeKeyDialogOpen = ref(false);
+function openRevokeKeyDialog(key) {
+  confirmRevokeKey.value = key;
+  revokeKeyDialogOpen.value = true;
+}
 async function revokeAccessKey() {
-  if (!confirmRevokeKey.value) return;
+  const target = confirmRevokeKey.value;
+  if (!target) return;
   try {
-    await api.revokeAccessKey(props.projectId, confirmRevokeKey.value.id);
-    const idx = accessKeys.value.findIndex((k) => k.id === confirmRevokeKey.value.id);
+    await api.revokeAccessKey(props.projectId, target.id);
+    const idx = accessKeys.value.findIndex((k) => k.id === target.id);
     if (idx !== -1) accessKeys.value[idx] = { ...accessKeys.value[idx], revoked: true };
-    confirmRevokeKey.value = null;
     toast.success('Access key revoked.');
   } catch (e) {
     toast.error(e.message);
+  } finally {
+    revokeKeyDialogOpen.value = false;
   }
 }
 
@@ -247,16 +278,24 @@ async function toggleTargetEnabled(target, enabled) {
     toast.error(e.message);
   }
 }
+// See confirmRevokeShare's comment above — same target/open-state split, same reason.
 const confirmDeleteTarget = ref(null);
+const deleteTargetDialogOpen = ref(false);
+function openDeleteTargetDialog(target) {
+  confirmDeleteTarget.value = target;
+  deleteTargetDialogOpen.value = true;
+}
 async function deleteTarget() {
-  if (!confirmDeleteTarget.value) return;
+  const target = confirmDeleteTarget.value;
+  if (!target) return;
   try {
-    await api.deleteGithubTarget(props.projectId, confirmDeleteTarget.value.id);
-    githubTargets.value = githubTargets.value.filter((t) => t.id !== confirmDeleteTarget.value.id);
-    confirmDeleteTarget.value = null;
+    await api.deleteGithubTarget(props.projectId, target.id);
+    githubTargets.value = githubTargets.value.filter((t) => t.id !== target.id);
     toast.success('GitHub sync target removed.');
   } catch (e) {
     toast.error(e.message);
+  } finally {
+    deleteTargetDialogOpen.value = false;
   }
 }
 
@@ -374,7 +413,7 @@ async function deleteProject() {
                   </Select>
                 </TableCell>
                 <TableCell class="text-right">
-                  <Button variant="ghost" size="icon-sm" title="Revoke access" @click="confirmRevokeShare = share">
+                  <Button variant="ghost" size="icon-sm" title="Revoke access" @click="openRevokeShareDialog(share)">
                     <PhTrash :size="14" weight="bold" />
                   </Button>
                 </TableCell>
@@ -425,7 +464,7 @@ async function deleteProject() {
                   <Badge :variant="k.revoked ? 'destructive' : 'success'">{{ k.revoked ? 'revoked' : 'active' }}</Badge>
                 </TableCell>
                 <TableCell class="text-right">
-                  <Button v-if="!k.revoked" variant="ghost" size="icon-sm" title="Revoke" @click="confirmRevokeKey = k">
+                  <Button v-if="!k.revoked" variant="ghost" size="icon-sm" title="Revoke" @click="openRevokeKeyDialog(k)">
                     <PhTrash :size="14" weight="bold" />
                   </Button>
                 </TableCell>
@@ -497,7 +536,7 @@ async function deleteProject() {
                   <Button variant="ghost" size="icon-sm" title="Edit" @click="openEditTarget(t)">
                     <PhPencilSimple :size="14" weight="bold" />
                   </Button>
-                  <Button variant="ghost" size="icon-sm" title="Remove" @click="confirmDeleteTarget = t">
+                  <Button variant="ghost" size="icon-sm" title="Remove" @click="openDeleteTargetDialog(t)">
                     <PhTrash :size="14" weight="bold" />
                   </Button>
                 </TableCell>
@@ -522,7 +561,7 @@ async function deleteProject() {
       <CardContent class="text-muted-foreground text-sm">You don't have permission to manage this project.</CardContent>
     </Card>
 
-    <AlertDialog :open="!!confirmRevokeShare" @update:open="(v) => !v && (confirmRevokeShare = null)">
+    <AlertDialog :open="revokeShareDialogOpen" @update:open="(v) => (revokeShareDialogOpen = v)">
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Revoke access?</AlertDialogTitle>
@@ -535,7 +574,7 @@ async function deleteProject() {
       </AlertDialogContent>
     </AlertDialog>
 
-    <AlertDialog :open="!!confirmRevokeKey" @update:open="(v) => !v && (confirmRevokeKey = null)">
+    <AlertDialog :open="revokeKeyDialogOpen" @update:open="(v) => (revokeKeyDialogOpen = v)">
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Revoke this access key?</AlertDialogTitle>
@@ -565,7 +604,7 @@ async function deleteProject() {
       </AlertDialogContent>
     </AlertDialog>
 
-    <AlertDialog :open="!!confirmDeleteTarget" @update:open="(v) => !v && (confirmDeleteTarget = null)">
+    <AlertDialog :open="deleteTargetDialogOpen" @update:open="(v) => (deleteTargetDialogOpen = v)">
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Remove this repository?</AlertDialogTitle>
