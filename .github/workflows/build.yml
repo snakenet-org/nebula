@@ -18,13 +18,11 @@ on:
 jobs:
   build-nebula:
     runs-on: ubuntu-latest
-    environment: prod
+    environment: Prod
     env:
       PUBLISHER: snakeNet
       MODULE: nebula
       NAME: Nebula Vault
-
-      GITHUB_TOKEN: ${{ secrets.GIT_PAT }}
     steps:
         - name: Checking out code...
           uses: actions/checkout@v5
@@ -35,7 +33,7 @@ jobs:
           with:
             registry: ghcr.io
             username: ${{ github.actor }}
-            password: ${{ secrets.GITHUB_TOKEN }}
+            password: ${{ secrets.GH_PAT }}
 
         - name: Set up Docker Buildx
           uses: docker/setup-buildx-action@v3
