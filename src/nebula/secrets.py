@@ -18,25 +18,31 @@
   triple), letting the frontend's review dialog pick secret vs. environment variable per row instead
   of one type for the whole batch. create_key's `value` param (added 2026-08-07) is optional — the
   create form can set an initial value in the same call, encrypted the same way set_value does;
-  omitting it leaves the key valueless exactly as before.
+  omitting it leaves the key valueless exactly as before. get_key_by_id (2026-08-08) is the one
+  project-agnostic lookup in this module — used only by nebula.github_sync/api/v1/project.py to
+  resolve a cross-project "use this key as our PAT" reference, where the caller doesn't yet know
+  which Project the referenced key belongs to. delete_key now refuses (SecretKeyInUseAsPatSourceError)
+  to delete a key that's still referenced by a ProjectGithubSync's pat_source_key_id — same
+  RESTRICT-and-surface-a-clean-409 shape as nebula.environments.delete_environment's
+  EnvironmentInUseError.
 @ai-rules:
   - Never log a plaintext value.
   - encrypt_value/decrypt_value only — never import `cryptography` directly here.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 2.3.0
+@version: 2.4.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-07
+@date: 2026-08-08
 """
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nebula.crypto import decrypt_value, encrypt_value
-from nebula.models.tables import SecretKey, VariableType
+from nebula.models.tables import ProjectGithubSync, SecretKey, VariableType
 
 
 class DuplicateSecretKeyNameError(Exception):
@@ -45,6 +51,11 @@ class DuplicateSecretKeyNameError(Exception):
 
 class SecretKeyNotFoundError(Exception):
     """Raised when a SecretKey id doesn't exist (or belongs to a different Project)."""
+
+
+class SecretKeyInUseAsPatSourceError(Exception):
+    """Raised when deleting a SecretKey that at least one ProjectGithubSync still references as its
+    PAT source (pat_source_key_id) — mirrors EnvironmentInUseError's RESTRICT-not-CASCADE shape."""
 
 
 class SecretValueNotFoundError(Exception):
@@ -78,6 +89,25 @@ async def get_key(session: AsyncSession, project_id: uuid.UUID, key_id: uuid.UUI
     if key is None or key.project_id != project_id:
         raise SecretKeyNotFoundError(str(key_id))
     return key
+
+
+async def get_key_by_id(session: AsyncSession, key_id: uuid.UUID) -> SecretKey | None:
+    """Project-agnostic lookup — the caller doesn't yet know which Project the key belongs to (a
+    cross-project PAT reference, see the module docstring). Returns None rather than raising, since
+    every caller of this needs to distinguish "not found" from other failure modes anyway."""
+    return await session.get(SecretKey, key_id)
+
+
+async def count_pat_source_references(session: AsyncSession, key_id: uuid.UUID) -> int:
+    """How many ProjectGithubSync targets (across every Project) currently reference this key as
+    their PAT source — used by delete_key's RESTRICT check."""
+    return (
+        await session.execute(
+            select(func.count())
+            .select_from(ProjectGithubSync)
+            .where(ProjectGithubSync.pat_source_key_id == key_id)
+        )
+    ).scalar_one()
 
 
 async def get_key_by_name(
@@ -149,6 +179,8 @@ async def update_key(
 
 
 async def delete_key(session: AsyncSession, key: SecretKey) -> None:
+    if await count_pat_source_references(session, key.id):
+        raise SecretKeyInUseAsPatSourceError(str(key.id))
     await session.delete(key)
     await session.commit()
 

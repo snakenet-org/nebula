@@ -14,14 +14,29 @@
   (owner/admin) gate as before, now per-target instead of per-project singular config; /github/sync
   fans out to every enabled target (nebula.github_sync.sync_all_for_project) — the same fan-out
   api/v1/secret.py's mutating routes now call automatically after every value change.
+  Since 2026-08-08, create_github_target/update_github_target accept a `pat_source_key_id`
+  (reference-mode PAT) alongside the existing free-text `pat`. `_resolve_pat_source` is the one
+  place that permission-checks it: the referenced SecretKey must exist, must have a value set, and
+  the ACTOR must have can_reveal (owner/admin) on the key's OWN Project — matching, not loosening,
+  the trust tier can_manage_github already requires on the target Project, since a reference lets
+  this Project's sync silently consume that other Project's secret as a live credential. This is
+  deliberately stricter than can_view: an Editor/Viewer of a foreign Project could otherwise wire up
+  a sync target that uses a secret they can't even reveal themselves as this Project's GitHub PAT.
+  _to_target_response resolves `pat_source_label` for display via nebula.projects.can_view (not
+  can_reveal) on the source Project instead — a looser bar because it's read-only display, but still
+  gated so a target's edit dialog never names a Project/key the CURRENT viewer has no visibility
+  into, even if a different admin configured the reference.
 @ai-rules:
   - Never expose ProjectShare rows, a sync target's PAT, or Project existence to a caller who fails
     can_view/can_manage_github respectively.
+  - A `pat_source_key_id` must never be accepted without independently checking can_reveal on ITS
+    OWN Project first — see _resolve_pat_source. Never trust nebula.github_sync's own defense-in-
+    depth existence check as a substitute for that permission check.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 3.0.0
+@version: 4.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-08-08
 """
 
 import uuid
@@ -32,10 +47,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from nebula import audit as audit_service
 from nebula import github_sync as github_sync_service
 from nebula import projects as projects_service
+from nebula import secrets as secrets_service
 from nebula import users
 from nebula.api.endpoint import Endpoint, get_current_user
 from nebula.database import get_session
-from nebula.github_sync import GitHubAuthError, GitHubSyncTargetNotFoundError, InvalidRepoUrlError
+from nebula.github_sync import (
+    GitHubSyncError,
+    GitHubSyncTargetNotFoundError,
+    InvalidPatConfigurationError,
+    InvalidRepoUrlError,
+    PatSourceKeyNotFoundError,
+)
 from nebula.models.project import (
     ProjectCreateRequest,
     ProjectGithubSyncResultResponse,
@@ -48,7 +70,14 @@ from nebula.models.project import (
     ProjectShareUpdateRequest,
     ProjectUpdateRequest,
 )
-from nebula.models.tables import Project, ProjectGithubSync, ProjectShare, ShareRole, UserAccount
+from nebula.models.tables import (
+    Project,
+    ProjectGithubSync,
+    ProjectShare,
+    SecretKey,
+    ShareRole,
+    UserAccount,
+)
 from nebula.projects import (
     DuplicateProjectShareError,
     ProjectNotFoundError,
@@ -84,13 +113,34 @@ async def _to_response(
     )
 
 
-def _to_target_response(target: ProjectGithubSync) -> ProjectGithubSyncTargetResponse:
+async def _to_target_response(
+    session: AsyncSession, actor: UserAccount, target: ProjectGithubSync
+) -> ProjectGithubSyncTargetResponse:
+    pat_source_project_id: uuid.UUID | None = None
+    pat_source_label: str | None = None
+    if target.pat_source_key_id is not None:
+        source_key = await secrets_service.get_key_by_id(session, target.pat_source_key_id)
+        if source_key is not None:
+            pat_source_project_id = source_key.project_id
+            # Display only — can_view (not can_reveal), and silently omitted rather than 403ing if
+            # the CURRENT viewer can't see that other Project (e.g. a different admin configured
+            # this reference). Never leaks the plaintext value either way.
+            try:
+                source_project, _share = await projects_service.get_visible_project(
+                    session, actor, source_key.project_id
+                )
+                pat_source_label = f"{source_project.name} / {source_key.name}"
+            except ProjectNotFoundError:
+                pass
     return ProjectGithubSyncTargetResponse(
         id=target.id,
         project_id=target.project_id,
         name=github_sync_service.target_display_name(target),
         repo_url=target.repo_url,
         enabled=target.enabled,
+        pat_source_key_id=target.pat_source_key_id,
+        pat_source_project_id=pat_source_project_id,
+        pat_source_label=pat_source_label,
         last_synced_at=target.last_synced_at,
         last_sync_success=target.last_sync_success,
         last_sync_detail=target.last_sync_detail,
@@ -375,6 +425,31 @@ class ProjectRouter(Endpoint):
         except GitHubSyncTargetNotFoundError:
             raise HTTPException(status_code=404, detail="GitHub sync target not found")
 
+    async def _resolve_pat_source(
+        self, session: AsyncSession, actor: UserAccount, key_id: uuid.UUID
+    ) -> SecretKey:
+        """Permission-checks a `pat_source_key_id` before it's ever handed to
+        nebula.github_sync — the referenced key must exist, must have a value set, and the ACTOR
+        must have can_reveal (owner/admin, not just can_view) on the key's OWN Project. See the
+        module docstring for why this is a stricter bar than can_view."""
+        key = await secrets_service.get_key_by_id(session, key_id)
+        if key is None:
+            raise HTTPException(status_code=422, detail="Referenced secret not found")
+        if key.ciphertext is None:
+            raise HTTPException(status_code=422, detail="Referenced secret has no value set")
+        try:
+            source_project, _share = await projects_service.get_visible_project(
+                session, actor, key.project_id
+            )
+        except ProjectNotFoundError:
+            raise HTTPException(status_code=422, detail="Referenced secret not found")
+        if not projects_service.can_reveal(actor, source_project):
+            raise HTTPException(
+                status_code=403,
+                detail="You must be an owner or admin of the referenced secret's project",
+            )
+        return key
+
     async def list_github_targets(
         self,
         project_id: uuid.UUID,
@@ -385,7 +460,7 @@ class ProjectRouter(Endpoint):
         if not projects_service.can_manage_github(actor, project):
             raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
         targets = await github_sync_service.list_sync_targets(session, project_id)
-        return [_to_target_response(t) for t in targets]
+        return [await _to_target_response(session, actor, t) for t in targets]
 
     async def create_github_target(
         self,
@@ -398,18 +473,29 @@ class ProjectRouter(Endpoint):
         project, _share = await self._get_or_404(session, actor, project_id)
         if not projects_service.can_manage_github(actor, project):
             raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
+        pat_source_key_id = None
+        if payload.pat_source_key_id is not None:
+            source_key = await self._resolve_pat_source(session, actor, payload.pat_source_key_id)
+            pat_source_key_id = source_key.id
         try:
             target = await github_sync_service.create_sync_target(
-                session, project, repo_url=payload.repo_url, pat=payload.pat, name=payload.name
+                session,
+                project,
+                repo_url=payload.repo_url,
+                pat=payload.pat,
+                pat_source_key_id=pat_source_key_id,
+                name=payload.name,
             )
         except InvalidRepoUrlError:
             raise HTTPException(status_code=422, detail="Not a valid GitHub repository URL")
+        except (InvalidPatConfigurationError, PatSourceKeyNotFoundError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         await audit_service.record_user_action(
             session, actor, request,
             action="github_sync_target.create", object_type="project_github_sync", object_id=target.id,
             object_label=github_sync_service.target_display_name(target), project_id=project.id,
         )
-        return _to_target_response(target)
+        return await _to_target_response(session, actor, target)
 
     async def update_github_target(
         self,
@@ -424,6 +510,10 @@ class ProjectRouter(Endpoint):
         if not projects_service.can_manage_github(actor, project):
             raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
         target = await self._github_target_or_404(session, project_id, target_id)
+        pat_source_key_id = None
+        if payload.pat_source_key_id is not None:
+            source_key = await self._resolve_pat_source(session, actor, payload.pat_source_key_id)
+            pat_source_key_id = source_key.id
         try:
             target = await github_sync_service.update_sync_target(
                 session,
@@ -431,16 +521,19 @@ class ProjectRouter(Endpoint):
                 name=payload.name,
                 repo_url=payload.repo_url,
                 pat=payload.pat,
+                pat_source_key_id=pat_source_key_id,
                 enabled=payload.enabled,
             )
         except InvalidRepoUrlError:
             raise HTTPException(status_code=422, detail="Not a valid GitHub repository URL")
+        except (InvalidPatConfigurationError, PatSourceKeyNotFoundError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
         await audit_service.record_user_action(
             session, actor, request,
             action="github_sync_target.update", object_type="project_github_sync", object_id=target.id,
             object_label=github_sync_service.target_display_name(target), project_id=project.id,
         )
-        return _to_target_response(target)
+        return await _to_target_response(session, actor, target)
 
     async def delete_github_target(
         self,
@@ -484,7 +577,7 @@ class ProjectRouter(Endpoint):
                 "error": None,
                 **outcome,
             }
-        except GitHubAuthError as exc:
+        except GitHubSyncError as exc:
             result = {
                 "target_id": target.id,
                 "name": github_sync_service.target_display_name(target),

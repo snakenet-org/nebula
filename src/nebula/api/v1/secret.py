@@ -21,15 +21,18 @@
   value in the same call instead of a separate PUT .../value round trip; `_auto_sync_github` only
   fires here when a value was actually included, matching every other route's "only sync when a
   value genuinely changed" rule.
+  Since 2026-08-08, delete_key can 409 (SecretKeyInUseAsPatSourceError) when the key being deleted
+  is still referenced as another ProjectGithubSync target's PAT source — see nebula.secrets and
+  nebula.github_sync's "reference" PAT mode.
 @ai-rules:
   - Never include SecretKey.ciphertext or a decrypted value in any response except reveal_value's.
   - A GitHub sync failure triggered by _auto_sync_github must never surface as an error response for
     the secret mutation that triggered it — catch broadly, audit-log, and move on.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 4.1.0
+@version: 4.2.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-07
+@date: 2026-08-08
 """
 
 import uuid
@@ -59,6 +62,7 @@ from nebula.secrets import (
     BulkCreateConflictError,
     BulkDuplicateKeyNamesError,
     DuplicateSecretKeyNameError,
+    SecretKeyInUseAsPatSourceError,
     SecretKeyNotFoundError,
     SecretValueNotFoundError,
 )
@@ -290,7 +294,14 @@ class SecretRouter(Endpoint):
             raise HTTPException(status_code=403, detail="You cannot edit this project")
         key = await self._key_or_404(session, project_id, key_id)
         key_id_copy, key_name = key.id, key.name
-        await secrets_service.delete_key(session, key)
+        try:
+            await secrets_service.delete_key(session, key)
+        except SecretKeyInUseAsPatSourceError:
+            raise HTTPException(
+                status_code=409,
+                detail="This secret is used as the personal access token for a GitHub sync target "
+                "— remove or reconfigure that sync target first.",
+            )
         await audit_service.record_user_action(
             session, actor, request,
             action="secret.delete", object_type="secret_key", object_id=key_id_copy,

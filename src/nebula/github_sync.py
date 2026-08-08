@@ -29,6 +29,18 @@
   The plaintext value is ALWAYS piped via stdin, never passed as a CLI argument — `gh secret set`/
   `gh variable set` both read the value from stdin when neither `--body` nor `-f` is given, and a
   CLI arg would otherwise be briefly visible to any other process on the host via `ps`.
+  Since 2026-08-08, a target's PAT can ALSO be a reference to another SecretKey elsewhere in the
+  vault (`pat_source_key_id`) instead of a copy it owns (`pat_ciphertext`) — see
+  nebula.models.tables.ProjectGithubSync's class docstring for the full invariant (exactly one of
+  the two is ever set, enforced by a DB CHECK constraint too). create_sync_target/update_sync_target
+  take BOTH `pat`/`pat_source_key_id` params and keep that XOR true on every write; permission-
+  checking that the caller may actually reference the source key (nebula.projects.can_reveal on ITS
+  Project, resolved via nebula.secrets.get_key_by_id) is the API router's job
+  (api/v1/project.py), same as every other cross-cutting permission check in this app — this module
+  only ever validates shape, never re-derives who's allowed to do what. `_resolve_token` is where
+  the actual live lookup happens, called fresh by sync_to_github on every single sync — nothing
+  about a reference is ever cached, which is the entire point: rotating the referenced key's value
+  anywhere in the vault takes effect on this target's very next sync with zero extra plumbing.
 @ai-rules:
   - Never pass a plaintext secret/PAT as a subprocess argv element — stdin only.
   - Never log a plaintext value, PAT, or full `gh` stderr verbatim if it could echo one back
@@ -36,11 +48,13 @@
   - A failure syncing one target (or one key within a target) must never raise out of
     sync_all_for_project — the caller (especially the auto-sync-on-change hook) must always get a
     complete per-target result list back, never an exception.
+  - create_sync_target/update_sync_target must never leave a row with both or neither of
+    pat_ciphertext/pat_source_key_id set — raise InvalidPatConfigurationError instead.
   - Maintain 100% type-hinting coverage.
 @dependencies: nebula.crypto
-@version: 2.0.0
+@version: 3.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-08-08
 """
 
 import asyncio
@@ -77,6 +91,25 @@ class GitHubAuthError(GitHubSyncError):
 
 class GitHubSyncTargetNotFoundError(Exception):
     """Raised when a sync target id doesn't exist (or belongs to a different Project)."""
+
+
+class InvalidPatConfigurationError(Exception):
+    """Raised when create/update would leave a target's PAT config as something other than exactly
+    one of a custom `pat` or a `pat_source_key_id` — the app-level side of
+    ck_project_github_syncs_pat_xor."""
+
+
+class PatSourceKeyNotFoundError(Exception):
+    """Raised when a `pat_source_key_id` doesn't resolve to an existing SecretKey. The API router
+    should normally have already caught this via a permission-checked lookup before calling in here
+    — this is a defense-in-depth backstop, e.g. against a TOCTOU race where the key was deleted
+    between that check and this commit."""
+
+
+class PatSourceUnavailableError(GitHubSyncError):
+    """Raised at sync time when a target is in "reference" mode but the referenced SecretKey is
+    gone or has no value set — surfaces as a normal failed sync (recorded on the target, caught by
+    sync_all_for_project) rather than a crash."""
 
 
 class SyncResult(TypedDict):
@@ -132,15 +165,28 @@ async def create_sync_target(
     project: Project,
     *,
     repo_url: str,
-    pat: str,
+    pat: str | None = None,
+    pat_source_key_id: uuid.UUID | None = None,
     name: str | None = None,
 ) -> ProjectGithubSync:
+    """Exactly one of `pat` (a custom token this target will own its own ciphertext for) or
+    `pat_source_key_id` (a reference — see the module docstring) must be given. The caller
+    (api/v1/project.py) is responsible for having already permission-checked `pat_source_key_id`
+    (nebula.projects.can_reveal on ITS Project) before calling in here — this function only
+    validates shape, plus a defense-in-depth existence check."""
+    if bool(pat) == bool(pat_source_key_id):
+        raise InvalidPatConfigurationError(
+            "Provide exactly one of a personal access token or a referenced secret."
+        )
     parse_owner_repo(repo_url)  # raises InvalidRepoUrlError before anything is persisted
+    if pat_source_key_id is not None and await session.get(SecretKey, pat_source_key_id) is None:
+        raise PatSourceKeyNotFoundError(str(pat_source_key_id))
     target = ProjectGithubSync(
         project_id=project.id,
         name=name.strip() if name and name.strip() else None,
         repo_url=repo_url.strip(),
-        pat_ciphertext=encrypt_value(pat),
+        pat_ciphertext=encrypt_value(pat) if pat else None,
+        pat_source_key_id=pat_source_key_id,
     )
     session.add(target)
     await session.commit()
@@ -155,11 +201,19 @@ async def update_sync_target(
     name: str | None = None,
     repo_url: str | None = None,
     pat: str | None = None,
+    pat_source_key_id: uuid.UUID | None = None,
     enabled: bool | None = None,
 ) -> ProjectGithubSync:
-    """Blank/omitted `pat` leaves the previously-stored one untouched — the frontend never echoes a
-    stored PAT back, so there's nothing for a blank field to legitimately overwrite with (same shape
-    as the pre-multi-repo update_github_config)."""
+    """Blank/omitted `pat` AND omitted `pat_source_key_id` leaves the current PAT config (whichever
+    mode it's in) untouched — the frontend never echoes a stored PAT back, so there's nothing for a
+    blank field to legitimately overwrite with (same shape as the pre-multi-repo
+    update_github_config). Providing `pat` switches (or stays) the target to "custom" mode;
+    providing `pat_source_key_id` switches (or stays) it to "reference" mode — providing BOTH in the
+    same call is rejected, since only one can ever win."""
+    if pat and pat_source_key_id is not None:
+        raise InvalidPatConfigurationError(
+            "Provide at most one of a personal access token or a referenced secret."
+        )
     if repo_url is not None:
         parse_owner_repo(repo_url)  # raises InvalidRepoUrlError before anything is persisted
         target.repo_url = repo_url.strip()
@@ -167,6 +221,12 @@ async def update_sync_target(
         target.name = name.strip() or None
     if pat:
         target.pat_ciphertext = encrypt_value(pat)
+        target.pat_source_key_id = None
+    elif pat_source_key_id is not None:
+        if await session.get(SecretKey, pat_source_key_id) is None:
+            raise PatSourceKeyNotFoundError(str(pat_source_key_id))
+        target.pat_source_key_id = pat_source_key_id
+        target.pat_ciphertext = None
     if enabled is not None:
         target.enabled = enabled
     await session.commit()
@@ -210,10 +270,28 @@ async def _record_target_status(
     await session.commit()
 
 
+async def _resolve_token(session: AsyncSession, target: ProjectGithubSync) -> str:
+    """The live PAT for this target: its own ciphertext in "custom" mode, or a fresh decrypt of the
+    referenced SecretKey's CURRENT ciphertext in "reference" mode — never cached, so a value
+    rotated anywhere in the vault is picked up on the target's very next sync. Raises
+    PatSourceUnavailableError (a GitHubSyncError) rather than a KeyError/TypeError so
+    sync_all_for_project's existing `except GitHubSyncError` handling covers this for free."""
+    if target.pat_source_key_id is not None:
+        source_key = await session.get(SecretKey, target.pat_source_key_id)
+        if source_key is None or source_key.ciphertext is None:
+            raise PatSourceUnavailableError(
+                "The referenced secret is missing or no longer has a value set."
+            )
+        return decrypt_value(source_key.ciphertext)
+    if target.pat_ciphertext is None:
+        raise PatSourceUnavailableError("No personal access token is configured.")
+    return decrypt_value(target.pat_ciphertext)
+
+
 async def sync_to_github(session: AsyncSession, target: ProjectGithubSync) -> dict:
-    """Push ONE sync target. Raises InvalidRepoUrlError/GitHubAuthError on outright failure to
-    connect (nothing was touched); otherwise always returns the per-key results dict, recording
-    per-key failures inside it rather than raising. Either way, the target's own
+    """Push ONE sync target. Raises InvalidRepoUrlError/GitHubAuthError/PatSourceUnavailableError on
+    outright failure to connect (nothing was touched); otherwise always returns the per-key results
+    dict, recording per-key failures inside it rather than raising. Either way, the target's own
     last_synced_at/last_sync_success/last_sync_detail are updated before returning/raising."""
     try:
         owner, repo = parse_owner_repo(target.repo_url)
@@ -221,7 +299,11 @@ async def sync_to_github(session: AsyncSession, target: ProjectGithubSync) -> di
         await _record_target_status(session, target, success=False, detail="Invalid repository URL")
         raise
 
-    token = decrypt_value(target.pat_ciphertext)
+    try:
+        token = await _resolve_token(session, target)
+    except PatSourceUnavailableError as exc:
+        await _record_target_status(session, target, success=False, detail=str(exc))
+        raise
 
     returncode, _stdout, stderr = await _run_gh(
         ["repo", "view", f"{owner}/{repo}", "--json", "name"], token=token

@@ -13,11 +13,24 @@
     trigger an on-demand sync (either one target or all of them at once). A target's PAT is
     write-only, same one-shot-reveal-never shape as the access-key token: the edit dialog's PAT
     field is always blank, and a blank submit leaves the stored token untouched. Built from
-    shadcn-vue Card/Table/Select/Badge/AlertDialog/Dialog/Switch/Input/Label/Button. The GitHub sync
-    table's enabled/paused control is a Switch (not a Checkbox, unlike the bulk-upload row-select
+    shadcn-vue Card/Table/Select/Badge/AlertDialog/Dialog/Switch/Tabs/Input/Label/Button. The GitHub
+    sync table's enabled/paused control is a Switch (not a Checkbox, unlike the bulk-upload row-select
     Checkboxes on ProjectView.vue) — a deliberate distinction: this toggles a persistent, already-
     live setting on save (`toggleTargetEnabled` calls the API immediately on flip), which reads more
     naturally as an on/off switch than a selection checkbox.
+    Since 2026-08-08, the Add/Edit repository Dialog's PAT field is a `patMode` Tabs toggle
+    ("Custom token" / "Reference a secret", same Tabs pattern as PasswordGeneratorDialog.vue) instead
+    of a single Input. "Reference a secret" is a two-step Project→Secret Select pair
+    (`patSourceProjects`/`patSourceKeys`, lazily loaded on first use of that tab — most targets never
+    need it) — the Project list is filtered client-side to `my_role` owner/admin only, since
+    referencing a secret you can't reveal yourself would let this Project's sync silently consume a
+    credential you never had visibility into (the backend independently re-enforces this via
+    can_reveal, this filter is purely so the picker never even offers an option the API would 403).
+    The Secret list is further filtered to `is_set` keys only (an unset key has nothing to
+    reference). Editing an existing reference-mode target shows its current `pat_source_label`
+    read-only and leaves both Selects unset — same "blank/omitted = unchanged" convention the custom
+    PAT field already had, now symmetric across both modes: picking nothing in either tab always
+    means "don't touch the stored PAT config."
   @ai-rules:
     - Every AlertDialog's per-item target (confirmRevokeShare/confirmRevokeKey/confirmDeleteTarget)
       must live in a ref that is ONLY ever set on open and cleared by our own code — never nulled by
@@ -29,10 +42,10 @@
       revokeAccessKey before this file's 2026-08-07 fix (see the code comment above
       confirmRevokeShare's declaration).
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, select, badge,
-    alert-dialog, dialog, switch, input, label, button, skeleton)
-  @version: 4.2.0
+    alert-dialog, dialog, switch, tabs, input, label, button, skeleton)
+  @version: 4.3.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-07
+  @date: 2026-08-08
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
@@ -45,6 +58,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -229,36 +243,105 @@ function toastResults(results) {
 
 const targetDialogOpen = ref(false);
 const editingTarget = ref(null); // null = creating a new target
-const targetForm = ref({ name: '', repo_url: '', pat: '' });
+const targetForm = ref({ name: '', repo_url: '', pat: '', pat_source_project_id: null, pat_source_key_id: null });
+const patMode = ref('custom'); // 'custom' | 'reference'
 const savingTarget = ref(false);
+
+// ── PAT "reference a secret" picker ─────────────────────────────────────────
+// Lazily loaded on first use — most targets stick with a custom token and never need this.
+const patSourceProjects = ref([]);
+const loadingPatSourceProjects = ref(false);
+const patSourceKeys = ref([]);
+const loadingPatSourceKeys = ref(false);
+async function ensurePatSourceProjectsLoaded() {
+  if (patSourceProjects.value.length || loadingPatSourceProjects.value) return;
+  loadingPatSourceProjects.value = true;
+  try {
+    const all = await api.listProjects();
+    // Only projects the caller can REVEAL (owner/admin) — the backend independently re-enforces
+    // this via can_reveal, this filter just keeps the picker from ever offering an option the API
+    // would reject.
+    patSourceProjects.value = all.filter((p) => ['owner', 'admin'].includes(p.my_role));
+  } catch (e) {
+    toast.error(e.message);
+  } finally {
+    loadingPatSourceProjects.value = false;
+  }
+}
+async function loadPatSourceKeys(projectId) {
+  if (!projectId) {
+    patSourceKeys.value = [];
+    return;
+  }
+  loadingPatSourceKeys.value = true;
+  try {
+    const keys = await api.listSecrets(projectId);
+    patSourceKeys.value = keys.filter((k) => k.is_set);
+  } catch (e) {
+    toast.error(e.message);
+    patSourceKeys.value = [];
+  } finally {
+    loadingPatSourceKeys.value = false;
+  }
+}
+watch(
+  () => targetForm.value.pat_source_project_id,
+  (projectId) => {
+    targetForm.value.pat_source_key_id = null;
+    loadPatSourceKeys(projectId);
+  }
+);
+
+function resetTargetForm() {
+  targetForm.value = { name: '', repo_url: '', pat: '', pat_source_project_id: null, pat_source_key_id: null };
+  patSourceKeys.value = [];
+}
 function openCreateTarget() {
   editingTarget.value = null;
-  targetForm.value = { name: '', repo_url: '', pat: '' };
+  patMode.value = 'custom';
+  resetTargetForm();
   targetDialogOpen.value = true;
+  ensurePatSourceProjectsLoaded();
 }
 function openEditTarget(target) {
   editingTarget.value = target;
-  targetForm.value = { name: target.name, repo_url: target.repo_url, pat: '' };
+  patMode.value = target.pat_source_key_id ? 'reference' : 'custom';
+  resetTargetForm();
+  targetForm.value.name = target.name;
+  targetForm.value.repo_url = target.repo_url;
   targetDialogOpen.value = true;
+  ensurePatSourceProjectsLoaded();
 }
 async function saveTarget() {
   savingTarget.value = true;
   try {
+    const payload = {
+      name: targetForm.value.name.trim() || null,
+      repo_url: targetForm.value.repo_url.trim(),
+    };
+    if (patMode.value === 'reference') {
+      if (targetForm.value.pat_source_key_id) {
+        payload.pat_source_key_id = targetForm.value.pat_source_key_id;
+      } else if (!editingTarget.value) {
+        toast.error('Pick a project and a secret to reference.');
+        return;
+      }
+    } else {
+      const pat = targetForm.value.pat.trim();
+      if (pat) {
+        payload.pat = pat;
+      } else if (!editingTarget.value) {
+        toast.error('Enter a personal access token.');
+        return;
+      }
+    }
     if (editingTarget.value) {
-      const updated = await api.updateGithubTarget(props.projectId, editingTarget.value.id, {
-        name: targetForm.value.name.trim() || null,
-        repo_url: targetForm.value.repo_url.trim(),
-        pat: targetForm.value.pat.trim() || null,
-      });
+      const updated = await api.updateGithubTarget(props.projectId, editingTarget.value.id, payload);
       const idx = githubTargets.value.findIndex((t) => t.id === updated.id);
       if (idx !== -1) githubTargets.value[idx] = updated;
       toast.success('GitHub sync target updated.');
     } else {
-      const created = await api.createGithubTarget(props.projectId, {
-        name: targetForm.value.name.trim() || null,
-        repo_url: targetForm.value.repo_url.trim(),
-        pat: targetForm.value.pat.trim(),
-      });
+      const created = await api.createGithubTarget(props.projectId, payload);
       githubTargets.value.push(created);
       toast.success('GitHub sync target added.');
     }
@@ -508,6 +591,11 @@ async function deleteProject() {
                 <TableCell>
                   <div class="font-medium">{{ t.name }}</div>
                   <div class="text-muted-foreground text-xs font-mono">{{ t.repo_url }}</div>
+                  <div class="text-muted-foreground text-xs mt-0.5 flex items-center gap-1">
+                    <PhKey :size="11" weight="bold" />
+                    <span v-if="t.pat_source_key_id">{{ t.pat_source_label || 'Referenced secret (no access)' }}</span>
+                    <span v-else>Custom token</span>
+                  </div>
                 </TableCell>
                 <TableCell>
                   <div class="flex items-center gap-2">
@@ -638,14 +726,64 @@ async function deleteProject() {
             <Input id="target-repo-url" v-model="targetForm.repo_url" placeholder="https://github.com/owner/repo" required />
           </div>
           <div class="space-y-1.5">
-            <Label for="target-pat">Personal access token</Label>
-            <Input
-              id="target-pat"
-              v-model="targetForm.pat"
-              type="password"
-              :placeholder="editingTarget ? 'Leave blank to keep the current token' : 'ghp_…'"
-              :required="!editingTarget"
-            />
+            <Label>Personal access token</Label>
+            <Tabs v-model="patMode">
+              <TabsList class="w-full">
+                <TabsTrigger value="custom" class="flex-1">Custom token</TabsTrigger>
+                <TabsTrigger value="reference" class="flex-1">Reference a secret</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="custom" class="space-y-1.5 pt-2">
+                <Input
+                  id="target-pat"
+                  v-model="targetForm.pat"
+                  type="password"
+                  :placeholder="editingTarget ? 'Leave blank to keep the current token' : 'ghp_…'"
+                />
+              </TabsContent>
+
+              <TabsContent value="reference" class="space-y-3 pt-2">
+                <p v-if="editingTarget?.pat_source_key_id" class="text-muted-foreground text-xs">
+                  Currently referencing
+                  <span class="font-medium text-foreground">{{ editingTarget.pat_source_label || 'a secret you no longer have access to' }}</span>.
+                  Pick a project and secret below to change it, or leave both unset to keep it.
+                </p>
+                <div class="space-y-1.5">
+                  <Label>Project</Label>
+                  <Select v-model="targetForm.pat_source_project_id">
+                    <SelectTrigger class="w-full"><SelectValue placeholder="Select a project…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem v-for="p in patSourceProjects" :key="p.id" :value="p.id">{{ p.name }}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p v-if="!loadingPatSourceProjects && !patSourceProjects.length" class="text-muted-foreground text-xs">
+                    You need to own or administer a project to reference one of its secrets.
+                  </p>
+                </div>
+                <div class="space-y-1.5">
+                  <Label>Secret</Label>
+                  <Select
+                    v-model="targetForm.pat_source_key_id"
+                    :disabled="!targetForm.pat_source_project_id || loadingPatSourceKeys"
+                  >
+                    <SelectTrigger class="w-full"><SelectValue placeholder="Select a secret…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem v-for="k in patSourceKeys" :key="k.id" :value="k.id">{{ k.name }}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p
+                    v-if="targetForm.pat_source_project_id && !loadingPatSourceKeys && !patSourceKeys.length"
+                    class="text-muted-foreground text-xs"
+                  >
+                    This project has no secrets with a value set yet.
+                  </p>
+                </div>
+                <p class="text-muted-foreground text-xs">
+                  The sync always uses this secret's CURRENT value — rotating it anywhere in the vault
+                  updates this repository's token too, with nothing to re-save here.
+                </p>
+              </TabsContent>
+            </Tabs>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" @click="targetDialogOpen = false">Cancel</Button>

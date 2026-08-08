@@ -13,16 +13,27 @@
   restricted to nebula.naming's letters/digits/hyphen/underscore charset — see that module for why
   (a Project name is one of the three identifiers api/v1/vault.py's external route addresses by
   name).
-@version: 3.1.0
+  Since 2026-08-08, a sync target's PAT is EITHER `pat` (a custom token, unchanged) OR
+  `pat_source_key_id` (a reference to another SecretKey elsewhere in the vault — see
+  nebula.github_sync's module docstring). CreateRequest requires EXACTLY one of the two
+  (`_validate_pat_mode`); UpdateRequest allows AT MOST one (both omitted = leave the current PAT
+  config, whichever mode it's in, untouched — the same "blank pat = unchanged" convention this
+  already had, just extended to cover the new field too). ProjectGithubSyncTargetResponse exposes
+  `pat_source_key_id` plus a resolved, display-only `pat_source_project_id`/`pat_source_label` —
+  populated by api/v1/project.py only when the CURRENT viewer can actually see that other Project
+  (nebula.projects.can_view), so this response never leaks the existence/name of a Project or key
+  the viewer has no visibility into, even though the reference itself may have been configured by a
+  different admin who could see it.
+@version: 4.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-07
+@date: 2026-08-08
 """
 
 import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from nebula.models.tables import ShareRole
 from nebula.naming import validate_name
@@ -61,17 +72,38 @@ class ProjectResponse(BaseModel):
 
 class ProjectGithubSyncTargetCreateRequest(BaseModel):
     repo_url: str
-    pat: str
     name: str | None = None
+    # Exactly one of these two — see _validate_pat_mode below.
+    pat: str | None = None
+    pat_source_key_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def _validate_pat_mode(self) -> "ProjectGithubSyncTargetCreateRequest":
+        if bool(self.pat) == bool(self.pat_source_key_id):
+            raise ValueError(
+                "Provide exactly one of `pat` (a custom token) or `pat_source_key_id` "
+                "(a reference to another secret)."
+            )
+        return self
 
 
 class ProjectGithubSyncTargetUpdateRequest(BaseModel):
     name: str | None = None
     repo_url: str | None = None
-    # Blank/omitted leaves the currently-stored PAT untouched — see
-    # nebula.github_sync.update_sync_target.
+    # Blank/omitted `pat` AND omitted `pat_source_key_id` leaves the currently-stored PAT config
+    # (whichever mode it's in) untouched — see nebula.github_sync.update_sync_target.
     pat: str | None = None
+    pat_source_key_id: uuid.UUID | None = None
     enabled: bool | None = None
+
+    @model_validator(mode="after")
+    def _validate_pat_mode(self) -> "ProjectGithubSyncTargetUpdateRequest":
+        if self.pat and self.pat_source_key_id is not None:
+            raise ValueError(
+                "Provide at most one of `pat` (a custom token) or `pat_source_key_id` "
+                "(a reference to another secret)."
+            )
+        return self
 
 
 class ProjectGithubSyncTargetResponse(BaseModel):
@@ -80,6 +112,12 @@ class ProjectGithubSyncTargetResponse(BaseModel):
     name: str
     repo_url: str
     enabled: bool
+    # "reference" mode when set, "custom" mode when null — see the module docstring above.
+    pat_source_key_id: uuid.UUID | None
+    # Resolved display info for `pat_source_key_id`, only populated when the current viewer can
+    # actually see that other Project — both null in "custom" mode too.
+    pat_source_project_id: uuid.UUID | None
+    pat_source_label: str | None
     last_synced_at: datetime | None
     last_sync_success: bool | None
     last_sync_detail: str | None

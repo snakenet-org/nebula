@@ -15,7 +15,17 @@
   NEVER store a plaintext value anywhere, this column and its ORM attribute are the only place a
   secret's actual content lives at rest) — ProjectGithubSync (a Project may have MANY simultaneous
   GitHub sync targets since the 2026-08-06 multi-repo redesign — see nebula.github_sync; each row is
-  its own repo_url + encrypted PAT + enabled flag + last-run status, `project_id` FK CASCADE) —
+  its own repo_url + enabled flag + last-run status, `project_id` FK CASCADE, plus its PAT config).
+  Since 2026-08-08, a target's PAT is EITHER a `pat_ciphertext` it owns directly (the "custom" mode,
+  unchanged from before) OR a `pat_source_key_id` pointing at a SecretKey elsewhere in the vault (the
+  "reference" mode) — exactly one of the two is ever set (`ck_project_github_syncs_pat_xor`, a DB
+  CHECK constraint, not just an app-level rule). A reference stores no ciphertext of its own at all;
+  nebula.github_sync resolves the live PAT by decrypting the REFERENCED SecretKey's own ciphertext at
+  sync time, so rotating that key's value anywhere in the vault automatically updates every sync
+  target that references it — no copy to keep in sync. `pat_source_key_id` is `ON DELETE RESTRICT`
+  (see nebula.secrets.delete_key's SecretKeyInUseAsPatSourceError) so a key can't be silently deleted
+  out from under a sync target that depends on it — same RESTRICT-not-CASCADE reasoning as
+  SecretKey.environment_id. —
   ProjectAccessKey (a project-scoped API credential, `token_hash` SHA-256 hex + `token_prefix` for UI
   display — the raw token is returned to the caller exactly once at creation and never stored, same
   opaque-high-entropy-token reasoning as Singularity's M2MAccount) — AuditLogEntry (append-only
@@ -25,11 +35,14 @@
 @ai-rules:
   - `SecretKey.ciphertext`/`ProjectGithubSync.pat_ciphertext` must only ever be written via
     nebula.crypto.encrypt_value and read via nebula.crypto.decrypt_value — never assign/return raw.
+  - Never let `pat_ciphertext` and `pat_source_key_id` both be set (or both be unset) on the same
+    ProjectGithubSync row — the DB CHECK constraint is a backstop, but nebula.github_sync's own CRUD
+    functions must keep them mutually exclusive too.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 4.0.0
+@version: 5.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-08-08
 """
 
 import enum
@@ -38,6 +51,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     ForeignKey,
     Index,
@@ -192,6 +206,14 @@ class ProjectGithubSync(Base):
     """
 
     __tablename__ = "project_github_syncs"
+    __table_args__ = (
+        # Exactly one of pat_ciphertext/pat_source_key_id — see nebula.github_sync's CRUD functions,
+        # which are the app-level side of this same invariant.
+        CheckConstraint(
+            "(pat_ciphertext IS NOT NULL) <> (pat_source_key_id IS NOT NULL)",
+            name="ck_project_github_syncs_pat_xor",
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
@@ -205,8 +227,16 @@ class ProjectGithubSync(Base):
     name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     repo_url: Mapped[str] = mapped_column(String(500), nullable=False)
     # A Fernet token (nebula.crypto.encrypt_value), same as SecretKey.ciphertext — a PAT is a
-    # credential like any other secret and is NEVER returned in an API response.
-    pat_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    # credential like any other secret and is NEVER returned in an API response. Nullable since
+    # 2026-08-08: null whenever pat_source_key_id is set instead (see the class docstring above).
+    pat_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # "Reference" mode: the PAT is resolved fresh at sync time by decrypting THIS SecretKey's own
+    # ciphertext, instead of a copy this row owns — see the class docstring above. RESTRICT (not
+    # CASCADE/SET NULL) so deleting a still-referenced key fails loudly rather than silently
+    # breaking a sync target's authentication.
+    pat_source_key_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("secret_keys.id", ondelete="RESTRICT"), nullable=True
+    )
     # A disabled target is skipped by both the automatic on-change sync and the "Sync all now"
     # button, but can still be triggered individually — lets an admin pause a flaky/retired
     # integration without losing its stored repo_url/PAT.
