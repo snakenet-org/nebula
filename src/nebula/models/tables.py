@@ -185,6 +185,10 @@ class SecretKey(Base):
     # A Fernet token (nebula.crypto.encrypt_value) — never a plaintext value. Nullable: a key can
     # exist before its value is first set.
     ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Per-key on/off toggle for GitHub sync (nebula.github_sync) — a disabled key is skipped by every
+    # sync target's push, both the automatic on-change hook and a manual "Sync now". Defaults true so
+    # a key behaves exactly as before this column existed unless explicitly turned off.
+    sync_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="SET NULL"), nullable=True
     )

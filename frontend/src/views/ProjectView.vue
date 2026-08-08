@@ -60,9 +60,15 @@
     all-caps even though nebula.naming.validate_name (the actual backend constraint) has always allowed
     `[A-Za-z0-9_-]+` — letters of either case. No backend change needed; this was a frontend-only
     cosmetic bug.
+    2026-08-08 (later same day): added a per-key GitHub sync toggle (new "Sync" table column) backed
+    by SecretKey.sync_enabled (nebula.secrets/api/v1/secret.py) — an editor flips a shadcn-vue Switch,
+    which PATCHes { sync_enabled } via the existing updateSecret call (toggleSync); a viewer sees a
+    read-only "synced"/"paused" Badge instead, same Select-vs-Badge split canEdit already uses for the
+    Environment column. Turning sync off only stops FUTURE pushes (nebula.github_sync.sync_to_github
+    now skips the key) — it never retroactively removes a value already pushed to a linked repo.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input, label,
-    select, table, popover, checkbox, alert-dialog, dialog, skeleton)
-  @version: 6.2.0
+    select, switch, table, popover, checkbox, alert-dialog, dialog, skeleton)
+  @version: 6.3.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-08
 -->
@@ -81,6 +87,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -233,6 +240,20 @@ async function reassignEnvironment(key, environmentId) {
     const idx = keys.value.findIndex((k) => k.id === updated.id);
     if (idx !== -1) keys.value[idx] = updated;
     toast.success('Environment updated.');
+  } catch (e) {
+    toast.error(e.message);
+  }
+}
+
+// ── GitHub sync toggle ───────────────────────────────────────────────────
+// Off just means "skip this key on every future push" (nebula.github_sync.sync_to_github) — it
+// does NOT remove a value already pushed to a linked repo, same push-only/no-deletion behavior a
+// deleted key already has.
+async function toggleSync(key, enabled) {
+  try {
+    const updated = await api.updateSecret(props.projectId, key.id, { sync_enabled: enabled });
+    const idx = keys.value.findIndex((k) => k.id === updated.id);
+    if (idx !== -1) keys.value[idx] = updated;
   } catch (e) {
     toast.error(e.message);
   }
@@ -489,6 +510,7 @@ async function saveValue() {
               <TableHead>Key</TableHead>
               <TableHead>Environment</TableHead>
               <TableHead>Value</TableHead>
+              <TableHead class="w-16">Sync</TableHead>
               <TableHead class="w-10"></TableHead>
             </TableRow>
           </TableHeader>
@@ -571,6 +593,17 @@ async function saveValue() {
                     </PopoverContent>
                   </Popover>
                 </div>
+              </TableCell>
+              <TableCell class="align-top">
+                <Switch
+                  v-if="canEdit"
+                  :model-value="key.sync_enabled"
+                  :title="key.sync_enabled ? 'Synced to GitHub — click to pause' : 'Not synced to GitHub — click to resume'"
+                  @update:model-value="(v) => toggleSync(key, v)"
+                />
+                <Badge v-else :variant="key.sync_enabled ? 'success' : 'outline'" class="text-[0.65rem] px-1.5 py-0">
+                  {{ key.sync_enabled ? 'synced' : 'paused' }}
+                </Badge>
               </TableCell>
               <TableCell class="align-top text-right">
                 <Button v-if="canEdit" variant="destructive" size="icon-xs" title="Delete key" @click="openDeleteKeyDialog(key)">

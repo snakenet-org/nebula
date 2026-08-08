@@ -23,14 +23,17 @@
   value genuinely changed" rule.
   Since 2026-08-08, delete_key can 409 (SecretKeyInUseAsPatSourceError) when the key being deleted
   is still referenced as another ProjectGithubSync target's PAT source — see nebula.secrets and
-  nebula.github_sync's "reference" PAT mode.
+  nebula.github_sync's "reference" PAT mode. Also since 2026-08-08, create_key/update_key thread a
+  `sync_enabled` flag through to nebula.secrets — a key with sync_enabled=False is skipped entirely
+  by github_sync.sync_to_github (never pushed, and never removed from an already-synced repo either,
+  same push-only/no-deletion behavior a deleted key already has).
 @ai-rules:
   - Never include SecretKey.ciphertext or a decrypted value in any response except reveal_value's.
   - A GitHub sync failure triggered by _auto_sync_github must never surface as an error response for
     the secret mutation that triggered it — catch broadly, audit-log, and move on.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 4.2.0
+@version: 4.3.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-08
 """
@@ -109,6 +112,7 @@ async def _to_response(session: AsyncSession, key: SecretKey) -> SecretKeyRespon
         variable_type=key.variable_type,
         is_set=key.ciphertext is not None,
         value=value,
+        sync_enabled=key.sync_enabled,
         created_at=key.created_at,
         updated_at=key.updated_at,
     )
@@ -194,6 +198,7 @@ class SecretRouter(Endpoint):
                 variable_type=payload.variable_type,
                 created_by=actor.id,
                 value=payload.value,
+                sync_enabled=payload.sync_enabled,
             )
         except DuplicateSecretKeyNameError:
             raise HTTPException(status_code=409, detail="A key with this name already exists")
@@ -270,6 +275,7 @@ class SecretRouter(Endpoint):
                 description=payload.description,
                 environment_id=payload.environment_id,
                 variable_type=payload.variable_type,
+                sync_enabled=payload.sync_enabled,
             )
         except DuplicateSecretKeyNameError:
             raise HTTPException(status_code=409, detail="A key with this name already exists")

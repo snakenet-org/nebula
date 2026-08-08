@@ -15,9 +15,11 @@
   SecretKeyCreateRequest.value (added 2026-08-07) is optional — the create form can set an initial
   value in the same call instead of requiring a separate value-set round trip afterward; omitting it
   (or sending blank) creates the key with no value yet, exactly as before.
-@version: 3.4.0
+  `sync_enabled` (2026-08-08) is a per-key on/off toggle for GitHub sync — defaults true on create,
+  optional on update (omitted means unchanged), always present on SecretKeyResponse.
+@version: 3.5.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-07
+@date: 2026-08-08
 """
 
 import uuid
@@ -35,6 +37,7 @@ class SecretKeyCreateRequest(BaseModel):
     environment_id: uuid.UUID
     variable_type: VariableType = VariableType.SECRET
     value: str | None = None
+    sync_enabled: bool = True
 
     _validate_name = field_validator("name")(validate_name)
 
@@ -66,6 +69,7 @@ class SecretKeyUpdateRequest(BaseModel):
     description: str | None = None
     environment_id: uuid.UUID | None = None
     variable_type: VariableType | None = None
+    sync_enabled: bool | None = None
 
     @field_validator("name")
     @classmethod
@@ -85,6 +89,9 @@ class SecretKeyResponse(BaseModel):
     # Populated only for variable_type == ENVIRONMENT (see the module docstring) — always null for a
     # SECRET, which must go through the separate reveal endpoint instead.
     value: str | None = None
+    # Per-key GitHub sync toggle (nebula.github_sync) — false means this key is skipped by every
+    # sync target's push, automatic or manual.
+    sync_enabled: bool
     created_at: datetime
     updated_at: datetime
 

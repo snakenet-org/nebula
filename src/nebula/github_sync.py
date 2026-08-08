@@ -41,6 +41,10 @@
   the actual live lookup happens, called fresh by sync_to_github on every single sync — nothing
   about a reference is ever cached, which is the entire point: rotating the referenced key's value
   anywhere in the vault takes effect on this target's very next sync with zero extra plumbing.
+  Since 2026-08-08, sync_to_github also skips any SecretKey with `sync_enabled=False` (a per-key
+  toggle, nebula.secrets/nebula.models.tables.SecretKey) — same as a key with no value set: it's
+  simply excluded from `by_environment` before any GitHub Environment/secret/variable push, so
+  toggling a key off never removes it from a repo it was already pushed to, only stops future pushes.
 @ai-rules:
   - Never pass a plaintext secret/PAT as a subprocess argv element — stdin only.
   - Never log a plaintext value, PAT, or full `gh` stderr verbatim if it could echo one back
@@ -52,7 +56,7 @@
     pat_ciphertext/pat_source_key_id set — raise InvalidPatConfigurationError instead.
   - Maintain 100% type-hinting coverage.
 @dependencies: nebula.crypto
-@version: 3.0.0
+@version: 3.1.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-08
 """
@@ -316,7 +320,7 @@ async def sync_to_github(session: AsyncSession, target: ProjectGithubSync) -> di
     keys = await secrets_service.list_keys(session, target.project_id)
     by_environment: dict[uuid.UUID, list[SecretKey]] = {}
     for key in keys:
-        if key.ciphertext is None:
+        if key.ciphertext is None or not key.sync_enabled:
             continue
         by_environment.setdefault(key.environment_id, []).append(key)
 

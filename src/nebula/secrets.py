@@ -24,13 +24,16 @@
   which Project the referenced key belongs to. delete_key now refuses (SecretKeyInUseAsPatSourceError)
   to delete a key that's still referenced by a ProjectGithubSync's pat_source_key_id — same
   RESTRICT-and-surface-a-clean-409 shape as nebula.environments.delete_environment's
-  EnvironmentInUseError.
+  EnvironmentInUseError. `sync_enabled` (2026-08-08) is a per-key on/off toggle for GitHub sync —
+  defaults true (create_key) and is otherwise only ever changed via update_key's optional param;
+  nebula.github_sync.sync_to_github is what actually skips a disabled key at push time, this module
+  only stores the flag.
 @ai-rules:
   - Never log a plaintext value.
   - encrypt_value/decrypt_value only — never import `cryptography` directly here.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 2.4.0
+@version: 2.5.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-08
 """
@@ -131,6 +134,7 @@ async def create_key(
     variable_type: VariableType,
     created_by: uuid.UUID,
     value: str | None = None,
+    sync_enabled: bool = True,
 ) -> SecretKey:
     key = SecretKey(
         project_id=project_id,
@@ -141,6 +145,7 @@ async def create_key(
         created_by=created_by,
         ciphertext=encrypt_value(value) if value else None,
         updated_by=created_by if value else None,
+        sync_enabled=sync_enabled,
     )
     session.add(key)
     try:
@@ -160,6 +165,7 @@ async def update_key(
     description: str | None = None,
     environment_id: uuid.UUID | None = None,
     variable_type: VariableType | None = None,
+    sync_enabled: bool | None = None,
 ) -> SecretKey:
     if name is not None:
         key.name = name
@@ -169,6 +175,8 @@ async def update_key(
         key.environment_id = environment_id
     if variable_type is not None:
         key.variable_type = variable_type
+    if sync_enabled is not None:
+        key.sync_enabled = sync_enabled
     try:
         await session.commit()
     except IntegrityError as exc:
