@@ -41,9 +41,14 @@
       no-opping the whole action with zero API call — this is exactly what happened to
       revokeAccessKey before this file's 2026-08-07 fix (see the code comment above
       confirmRevokeShare's declaration).
+    2026-08-08: the three row-level destructive icon buttons (revoke share, revoke access key, remove
+    GitHub target) recolored from `ghost` to the existing `destructive` Button variant, same pass as
+    ProjectView.vue/EnvironmentsView.vue — see ProjectView.vue's header for the fuller rationale
+    (destructive actions should read as a warning color, not look identical to a neutral edit/sync
+    action). No behavior change.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, select, badge,
     alert-dialog, dialog, switch, tabs, input, label, button, skeleton)
-  @version: 4.3.0
+  @version: 4.4.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-08
 -->
@@ -496,7 +501,7 @@ async function deleteProject() {
                   </Select>
                 </TableCell>
                 <TableCell class="text-right">
-                  <Button variant="ghost" size="icon-sm" title="Revoke access" @click="openRevokeShareDialog(share)">
+                  <Button variant="destructive" size="icon-sm" title="Revoke access" @click="openRevokeShareDialog(share)">
                     <PhTrash :size="14" weight="bold" />
                   </Button>
                 </TableCell>
@@ -547,7 +552,7 @@ async function deleteProject() {
                   <Badge :variant="k.revoked ? 'destructive' : 'success'">{{ k.revoked ? 'revoked' : 'active' }}</Badge>
                 </TableCell>
                 <TableCell class="text-right">
-                  <Button v-if="!k.revoked" variant="ghost" size="icon-sm" title="Revoke" @click="openRevokeKeyDialog(k)">
+                  <Button v-if="!k.revoked" variant="destructive" size="icon-sm" title="Revoke" @click="openRevokeKeyDialog(k)">
                     <PhTrash :size="14" weight="bold" />
                   </Button>
                 </TableCell>
@@ -624,7 +629,7 @@ async function deleteProject() {
                   <Button variant="ghost" size="icon-sm" title="Edit" @click="openEditTarget(t)">
                     <PhPencilSimple :size="14" weight="bold" />
                   </Button>
-                  <Button variant="ghost" size="icon-sm" title="Remove" @click="openDeleteTargetDialog(t)">
+                  <Button variant="destructive" size="icon-sm" title="Remove" @click="openDeleteTargetDialog(t)">
                     <PhTrash :size="14" weight="bold" />
                   </Button>
                 </TableCell>

@@ -7,16 +7,19 @@
     regenerates a fresh password on every step per the product ask ("with each step of the slider the
     password should randomly generate new"), plus its own explicit regenerate button. Both values are
     shown in a monospace read-only box with a Copy button (PhCopy/PhCheck swap, same 1500ms-then-
-    revert pattern as ProjectSettingsView's access-token copy button). Nothing here ever leaves the
-    browser — no API call, no persistence.
-  @dependencies: vue, @phosphor-icons/vue, shadcn-vue (dialog, tabs, slider, button)
-  @version: 1.0.0
+    revert pattern as ProjectSettingsView's access-token copy button) plus a `toast.success` (vue-sonner,
+    same convention as every other mutation toast in the app) so the click is unmistakable even though
+    the icon-swap alone sits inside a small icon button. Nothing here ever leaves the browser — no API
+    call, no persistence.
+  @dependencies: vue, @phosphor-icons/vue, vue-sonner, shadcn-vue (dialog, tabs, slider, button)
+  @version: 1.1.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-06
+  @date: 2026-08-08
 -->
 <script setup>
 import { ref, watch } from 'vue';
 import { PhArrowsClockwise, PhCheck, PhCopy } from '@phosphor-icons/vue';
+import { toast } from 'vue-sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Slider } from '@/components/ui/slider';
@@ -59,6 +62,7 @@ const copiedPassword = ref(false);
 function copy(value, flag) {
   navigator.clipboard?.writeText(value);
   flag.value = true;
+  toast.success('Copied to clipboard.');
   setTimeout(() => (flag.value = false), 1500);
 }
 </script>

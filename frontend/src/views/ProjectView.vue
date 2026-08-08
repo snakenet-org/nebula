@@ -43,15 +43,32 @@
     code review): a Playwright pass that created a throwaway key and clicked through the confirm
     dialog showed the dialog closing with zero `DELETE /api/v1/secret/...` request ever leaving the
     browser.
+    2026-08-08: added a quick copy-to-clipboard button (PhCopy/PhCheck swap, same 1500ms-then-revert
+    pattern as ProjectSettingsView's access-token copy button) next to each value in the table.
+    Environment variables copy their already-in-hand `key.value` with no API call; a secret copies
+    its already-`revealed` plaintext if the row is currently expanded, otherwise fetches it fresh via
+    the same `revealSecretValue` call/`canReveal` gate the Eye button uses — deliberately without
+    populating `revealed`, so a "quick copy" never forces the plaintext to also render on screen. Also
+    recolored the row's Delete-key button from `ghost` to the existing `destructive` Button variant so
+    it reads as a warning color like every other destructive action in the app, instead of looking
+    identical to a neutral action (rename/edit/copy).
+    2026-08-08 (later same day): key search widened (w-40 → w-64) plus a PhX clear button (shown only
+    when keySearch is non-empty) inside the input's own right padding, mirroring how the search icon
+    already sits in the left padding. Also dropped the `uppercase` Tailwind class from the new-key Name
+    input — it only forced the *displayed* text to render as caps (CSS text-transform, not a data
+    transform), which made a deliberately-mixed-case key name look like it was being forced to
+    all-caps even though nebula.naming.validate_name (the actual backend constraint) has always allowed
+    `[A-Za-z0-9_-]+` — letters of either case. No backend change needed; this was a frontend-only
+    cosmetic bug.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input, label,
     select, table, popover, checkbox, alert-dialog, dialog, skeleton)
-  @version: 6.0.0
+  @version: 6.2.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-07
+  @date: 2026-08-08
 -->
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue';
-import { PhArrowLeft, PhEye, PhEyeSlash, PhGear, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload } from '@phosphor-icons/vue';
+import { PhArrowLeft, PhCheck, PhCopy, PhEye, PhEyeSlash, PhGear, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhX } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { parseEnvFile } from '../lib/envFile';
@@ -295,6 +312,28 @@ async function toggleReveal(key) {
   }
 }
 
+// ── Copy value ────────────────────────────────────────────────────────────
+// Environment variables are never anonymized, so their value is already in hand. A secret whose
+// value hasn't been revealed yet is fetched on demand (same revealSecretValue call the Eye button
+// uses, same canReveal gate below) and copied straight to the clipboard without populating
+// `revealed` — a "quick copy" shouldn't force the plaintext to also appear on screen.
+const copiedIds = reactive({});
+async function copyValue(key) {
+  try {
+    const value =
+      key.variable_type === 'environment'
+        ? key.value
+        : revealed[key.id] !== undefined
+          ? revealed[key.id]
+          : (await api.revealSecretValue(props.projectId, key.id)).value;
+    await navigator.clipboard?.writeText(value);
+    copiedIds[key.id] = true;
+    setTimeout(() => delete copiedIds[key.id], 1500);
+  } catch (e) {
+    toast.error(e.message);
+  }
+}
+
 // ── Set value ─────────────────────────────────────────────────────────────
 const editingKeyId = ref(null);
 const editingValue = ref('');
@@ -362,7 +401,16 @@ async function saveValue() {
         <div class="flex items-center gap-2">
           <div class="relative">
             <PhMagnifyingGlass :size="14" weight="bold" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <Input v-model="keySearch" placeholder="Search keys…" class="h-8 w-40 pl-7" />
+            <Input v-model="keySearch" placeholder="Search keys…" class="h-8 w-64 pl-7 pr-7" />
+            <button
+              v-if="keySearch"
+              type="button"
+              title="Clear search"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              @click="keySearch = ''"
+            >
+              <PhX :size="14" weight="bold" />
+            </button>
           </div>
           <Select v-model="filterEnvironmentId">
             <SelectTrigger size="sm" class="w-40"><SelectValue /></SelectTrigger>
@@ -391,7 +439,7 @@ async function saveValue() {
           <form @submit.prevent="addKey" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <div class="space-y-1.5">
               <Label for="new-key-name">Name</Label>
-              <Input id="new-key-name" v-model="newKey.name" placeholder="KEY_NAME" required class="uppercase" />
+              <Input id="new-key-name" v-model="newKey.name" placeholder="KEY_NAME" required />
             </div>
             <div class="space-y-1.5">
               <Label for="new-key-description">Description</Label>
@@ -490,6 +538,17 @@ async function saveValue() {
                     <PhEye v-else :size="13" weight="bold" />
                   </Button>
 
+                  <Button
+                    v-if="key.is_set && (key.variable_type === 'environment' || canReveal)"
+                    variant="ghost"
+                    size="icon-xs"
+                    :title="copiedIds[key.id] ? 'Copied!' : 'Copy value'"
+                    @click="copyValue(key)"
+                  >
+                    <PhCheck v-if="copiedIds[key.id]" :size="13" weight="bold" />
+                    <PhCopy v-else :size="13" weight="bold" />
+                  </Button>
+
                   <Popover
                     v-if="canEdit"
                     :open="editingKeyId === key.id"
@@ -514,7 +573,7 @@ async function saveValue() {
                 </div>
               </TableCell>
               <TableCell class="align-top text-right">
-                <Button v-if="canEdit" variant="ghost" size="icon-xs" title="Delete key" @click="openDeleteKeyDialog(key)">
+                <Button v-if="canEdit" variant="destructive" size="icon-xs" title="Delete key" @click="openDeleteKeyDialog(key)">
                   <PhTrash :size="13" weight="bold" />
                 </Button>
               </TableCell>

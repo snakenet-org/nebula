@@ -7,11 +7,13 @@
     action for a non-admin, mirroring ProjectSettingsView's own client-side-hide-only convention).
     secret_key_count is shown per row as a delete-safety hint — the backend 409s
     (EnvironmentInUseError) if a still-linked Environment is deleted anyway.
+    2026-08-08: the row's Delete button recolored from `ghost` to the existing `destructive` Button
+    variant — see ProjectView.vue's header for the fuller rationale.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, badge, button,
     input, label, textarea, dialog, alert-dialog, skeleton)
-  @version: 1.0.0
+  @version: 1.1.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-06
+  @date: 2026-08-08
 -->
 <script setup>
 import { computed, onMounted, ref } from 'vue';
@@ -179,7 +181,7 @@ async function deleteEnvironment() {
               </Button>
               <Button
                 v-if="isAdmin"
-                variant="ghost"
+                variant="destructive"
                 size="icon-xs"
                 title="Delete"
                 @click="confirmDelete = env"
