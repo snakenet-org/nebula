@@ -45,6 +45,14 @@
   toggle, nebula.secrets/nebula.models.tables.SecretKey) — same as a key with no value set: it's
   simply excluded from `by_environment` before any GitHub Environment/secret/variable push, so
   toggling a key off never removes it from a repo it was already pushed to, only stops future pushes.
+  Since 2026-08-09, a SecretKey itself can ALSO be a reference to another SecretKey's value
+  (`source_key_id` — a DIFFERENT mechanism from this module's own `pat_source_key_id`, generalized
+  the same way from "a sync target's PAT" to "any key's value" — see nebula.secrets' module
+  docstring). Its own `ciphertext` is always NULL by construction, so sync_to_github resolves each
+  key's actually-in-force `(variable_type, ciphertext)` via nebula.secrets.resolve_effective before
+  the "has a value" check, rather than reading `key.ciphertext`/`key.variable_type` directly — a
+  reference key syncs exactly like a normal key from here on, per explicit product requirement
+  ("referenced keys should still be able to be synced to GitHub").
 @ai-rules:
   - Never pass a plaintext secret/PAT as a subprocess argv element — stdin only.
   - Never log a plaintext value, PAT, or full `gh` stderr verbatim if it could echo one back
@@ -56,9 +64,9 @@
     pat_ciphertext/pat_source_key_id set — raise InvalidPatConfigurationError instead.
   - Maintain 100% type-hinting coverage.
 @dependencies: nebula.crypto
-@version: 3.1.0
+@version: 3.2.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-08
+@date: 2026-08-09
 """
 
 import asyncio
@@ -317,11 +325,20 @@ async def sync_to_github(session: AsyncSession, target: ProjectGithubSync) -> di
         await _record_target_status(session, target, success=False, detail=detail)
         raise GitHubAuthError(detail)
 
+    # A reference key (source_key_id set) always has its OWN ciphertext NULL by construction — its
+    # real value/type live on the SOURCE key instead, resolved fresh per key below via
+    # resolve_effective so a reference syncs exactly like a normal key from this point on ("Referenced
+    # keys should still be able to be synced to GitHub").
     keys = await secrets_service.list_keys(session, target.project_id)
+    effective: dict[uuid.UUID, tuple[VariableType, str]] = {}
     by_environment: dict[uuid.UUID, list[SecretKey]] = {}
     for key in keys:
-        if key.ciphertext is None or not key.sync_enabled:
+        if not key.sync_enabled:
             continue
+        variable_type, ciphertext = await secrets_service.resolve_effective(session, key)
+        if ciphertext is None:
+            continue
+        effective[key.id] = (variable_type, ciphertext)
         by_environment.setdefault(key.environment_id, []).append(key)
 
     environments_synced = 0
@@ -341,8 +358,9 @@ async def sync_to_github(session: AsyncSession, target: ProjectGithubSync) -> di
         environments_synced += 1
 
         for key in env_keys:
-            plaintext = decrypt_value(key.ciphertext or "")
-            is_secret = key.variable_type == VariableType.SECRET
+            variable_type, ciphertext = effective[key.id]
+            plaintext = decrypt_value(ciphertext)
+            is_secret = variable_type == VariableType.SECRET
             verb = "secret" if is_secret else "variable"
             returncode, _stdout, stderr = await _run_gh(
                 [verb, "set", key.name, "--repo", f"{owner}/{repo}", "--env", environment.name],

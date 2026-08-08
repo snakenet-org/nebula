@@ -12,9 +12,9 @@
     RS256 tokens purely from the JWT header.
   - Maintain 100% type-hinting coverage.
 @dependencies: bcrypt, pyjwt
-@version: 1.0.0
+@version: 1.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-05
+@date: 2026-08-09
 """
 
 import time
@@ -69,3 +69,22 @@ def decode_local_token(token: str) -> dict:
     if not settings.jwt_secret:
         raise RuntimeError("NEBULA_JWT_SECRET is not configured")
     return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"], issuer=LOCAL_ISSUER)
+
+
+def decode_local_token_allow_expired(token: str) -> dict:
+    """Validate a locally minted HS256 token's signature/issuer while ignoring `exp`.
+
+    Used only by POST /api/v1/auth/refresh, which enforces its own grace-period check against the
+    claims' `exp` (settings.jwt_refresh_grace) instead of PyJWT's own hard expiry rejection — that's
+    the whole point of the refresh route: a token up to `jwt_refresh_grace` seconds past its own
+    expiry is still refreshable.
+    """
+    if not settings.jwt_secret:
+        raise RuntimeError("NEBULA_JWT_SECRET is not configured")
+    return jwt.decode(
+        token,
+        settings.jwt_secret,
+        algorithms=["HS256"],
+        issuer=LOCAL_ISSUER,
+        options={"verify_exp": False},
+    )

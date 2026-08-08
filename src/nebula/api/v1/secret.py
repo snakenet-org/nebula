@@ -27,15 +27,41 @@
   `sync_enabled` flag through to nebula.secrets — a key with sync_enabled=False is skipped entirely
   by github_sync.sync_to_github (never pushed, and never removed from an already-synced repo either,
   same push-only/no-deletion behavior a deleted key already has).
+  Since 2026-08-09, create_key also accepts `payload.source_key_id`, making the new key a REFERENCE
+  to another SecretKey's value instead of owning one directly (generalizes the GitHub-sync PAT
+  reference — nebula.github_sync's `pat_source_key_id` — to ordinary secrets/variables; see
+  nebula.secrets' module docstring for the resolution mechanics). `_resolve_source_key` is the one
+  place that permission-checks it, mirroring api/v1/project.py's `_resolve_pat_source` almost
+  exactly: the referenced key must exist, must belong to a DIFFERENT Project (the product ask is
+  explicitly cross-project), must not itself be a reference (no chaining), and the ACTOR must have
+  can_reveal (owner/admin, not just can_view) on the key's OWN Project — a Viewer/Editor of a foreign
+  Project could otherwise wire up a reference that consumes a secret they can't even reveal
+  themselves. delete_key can now ALSO 409 (SecretKeyInUseAsReferenceSourceError) when the key being
+  deleted is still referenced by another SecretKey's source_key_id. update_key refuses
+  (SecretKeyIsReferenceError → 409) to change a reference key's `variable_type`; set_value refuses
+  the same way for its value — both are only ever changed by editing the SOURCE key, in ITS OWN
+  Project ("referenced keys can only be changed in the source project"); name/description/
+  environment_id/sync_enabled stay freely editable regardless of reference mode, since those are the
+  referencing row's own local metadata. `_to_response` resolves `variable_type`/`is_set`/`value` via
+  nebula.secrets.resolve_effective (the SOURCE key's CURRENT values for a reference, never this row's
+  own possibly-irrelevant columns) and `source_project_id`/`source_label` via can_view on the source
+  Project (display-only, silently omitted rather than 403ing if the current viewer can't see it —
+  same shape as api/v1/project.py's `_to_target_response`). Deleting a reference key itself is an
+  ordinary delete of just that row — it never touches (or even reveals visibility into) the source
+  key it points at, since a FK delete only ever cascades/restricts downward, never upward to the row
+  it references.
 @ai-rules:
   - Never include SecretKey.ciphertext or a decrypted value in any response except reveal_value's.
   - A GitHub sync failure triggered by _auto_sync_github must never surface as an error response for
     the secret mutation that triggered it — catch broadly, audit-log, and move on.
+  - A `source_key_id` must never be accepted without independently checking can_reveal on ITS OWN
+    Project first — see _resolve_source_key. Never trust nebula.secrets' own defense-in-depth
+    existence/no-chaining checks as a substitute for that permission check.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 4.3.0
+@version: 5.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-08
+@date: 2026-08-09
 """
 
 import uuid
@@ -66,8 +92,12 @@ from nebula.secrets import (
     BulkDuplicateKeyNamesError,
     DuplicateSecretKeyNameError,
     SecretKeyInUseAsPatSourceError,
+    SecretKeyInUseAsReferenceSourceError,
+    SecretKeyIsReferenceError,
     SecretKeyNotFoundError,
     SecretValueNotFoundError,
+    SourceKeyIsReferenceError,
+    SourceKeyNotFoundError,
 )
 
 
@@ -95,13 +125,36 @@ async def _auto_sync_github(
         )
 
 
-async def _to_response(session: AsyncSession, key: SecretKey) -> SecretKeyResponse:
+async def _to_response(
+    session: AsyncSession, actor: UserAccount, key: SecretKey
+) -> SecretKeyResponse:
     environment = await environments_service.get_environment(session, key.environment_id)
+    # Resolved — for a reference key this is the SOURCE key's CURRENT type/value, never this row's
+    # own possibly-irrelevant columns (nebula.secrets.resolve_effective).
+    variable_type, ciphertext = await secrets_service.resolve_effective(session, key)
     # An "environment" variable is deliberately not anonymized — its value goes straight into the
     # list response; a "secret" always stays null here, plaintext only via the reveal endpoint.
     value = None
-    if key.variable_type == VariableType.ENVIRONMENT and key.ciphertext is not None:
+    if variable_type == VariableType.ENVIRONMENT and ciphertext is not None:
         value = await secrets_service.reveal_value(session, key)
+
+    source_project_id: uuid.UUID | None = None
+    source_label: str | None = None
+    if key.source_key_id is not None:
+        source_key = await secrets_service.get_key_by_id(session, key.source_key_id)
+        if source_key is not None:
+            # Display only — can_view (not can_reveal), silently omitted rather than 403ing if the
+            # CURRENT viewer can't see that other Project — same shape as api/v1/project.py's
+            # _to_target_response for pat_source_label.
+            try:
+                source_project, _share = await projects_service.get_visible_project(
+                    session, actor, source_key.project_id
+                )
+                source_project_id = source_project.id
+                source_label = f"{source_project.name} / {source_key.name}"
+            except ProjectNotFoundError:
+                pass
+
     return SecretKeyResponse(
         id=key.id,
         project_id=key.project_id,
@@ -109,10 +162,13 @@ async def _to_response(session: AsyncSession, key: SecretKey) -> SecretKeyRespon
         description=key.description,
         environment_id=key.environment_id,
         environment_name=environment.name,
-        variable_type=key.variable_type,
-        is_set=key.ciphertext is not None,
+        variable_type=variable_type,
+        is_set=ciphertext is not None,
         value=value,
         sync_enabled=key.sync_enabled,
+        source_key_id=key.source_key_id,
+        source_project_id=source_project_id,
+        source_label=source_label,
         created_at=key.created_at,
         updated_at=key.updated_at,
     )
@@ -166,6 +222,38 @@ class SecretRouter(Endpoint):
         except environments_service.EnvironmentNotFoundError:
             raise HTTPException(status_code=404, detail="Environment not found")
 
+    async def _resolve_source_key(
+        self, session: AsyncSession, actor: UserAccount, project_id: uuid.UUID, key_id: uuid.UUID
+    ) -> SecretKey:
+        """Permission-checks a `source_key_id` before it's ever handed to nebula.secrets — the
+        referenced key must exist, must belong to a DIFFERENT Project (referencing is explicitly
+        cross-project — see the module docstring), must not itself already be a reference (no
+        chaining), and the ACTOR must have can_reveal (owner/admin, not just can_view) on the key's
+        OWN Project. Mirrors api/v1/project.py's `_resolve_pat_source` almost exactly."""
+        key = await secrets_service.get_key_by_id(session, key_id)
+        if key is None:
+            raise HTTPException(status_code=422, detail="Referenced secret not found")
+        if key.project_id == project_id:
+            raise HTTPException(
+                status_code=422, detail="Reference a key from a different project"
+            )
+        if key.source_key_id is not None:
+            raise HTTPException(
+                status_code=422, detail="Cannot reference a key that is itself a reference"
+            )
+        try:
+            source_project, _share = await projects_service.get_visible_project(
+                session, actor, key.project_id
+            )
+        except ProjectNotFoundError:
+            raise HTTPException(status_code=422, detail="Referenced secret not found")
+        if not projects_service.can_reveal(actor, source_project):
+            raise HTTPException(
+                status_code=403,
+                detail="You must be an owner or admin of the referenced secret's project",
+            )
+        return key
+
     async def list_keys(
         self,
         project_id: uuid.UUID,
@@ -174,7 +262,7 @@ class SecretRouter(Endpoint):
     ) -> list[SecretKeyResponse]:
         await self._project_or_404(session, actor, project_id)
         rows = await secrets_service.list_keys(session, project_id)
-        return [await _to_response(session, row) for row in rows]
+        return [await _to_response(session, actor, row) for row in rows]
 
     async def create_key(
         self,
@@ -188,6 +276,12 @@ class SecretRouter(Endpoint):
         if not projects_service.can_edit(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot edit this project")
         await self._environment_or_404(session, payload.environment_id)
+        source_key_id = None
+        if payload.source_key_id is not None:
+            source_key = await self._resolve_source_key(
+                session, actor, project_id, payload.source_key_id
+            )
+            source_key_id = source_key.id
         try:
             row = await secrets_service.create_key(
                 session,
@@ -199,17 +293,26 @@ class SecretRouter(Endpoint):
                 created_by=actor.id,
                 value=payload.value,
                 sync_enabled=payload.sync_enabled,
+                source_key_id=source_key_id,
             )
         except DuplicateSecretKeyNameError:
             raise HTTPException(status_code=409, detail="A key with this name already exists")
+        except SourceKeyNotFoundError:
+            # Defense-in-depth only — _resolve_source_key should already have caught this via a
+            # permission-checked lookup (e.g. a TOCTOU race where the key was deleted meanwhile).
+            raise HTTPException(status_code=422, detail="Referenced secret not found")
+        except SourceKeyIsReferenceError:
+            raise HTTPException(
+                status_code=422, detail="Cannot reference a key that is itself a reference"
+            )
         await audit_service.record_user_action(
             session, actor, request,
             action="secret.create", object_type="secret_key", object_id=row.id,
             object_label=row.name, project_id=project_id,
         )
-        if payload.value:
+        if payload.value or source_key_id is not None:
             await _auto_sync_github(session, actor, request, project_id)
-        return await _to_response(session, row)
+        return await _to_response(session, actor, row)
 
     async def bulk_create_keys(
         self,
@@ -250,7 +353,7 @@ class SecretRouter(Endpoint):
                 object_label=row.name, project_id=project_id, detail="Bulk .env upload",
             )
         await _auto_sync_github(session, actor, request, project_id)
-        return [await _to_response(session, row) for row in rows]
+        return [await _to_response(session, actor, row) for row in rows]
 
     async def update_key(
         self,
@@ -279,13 +382,18 @@ class SecretRouter(Endpoint):
             )
         except DuplicateSecretKeyNameError:
             raise HTTPException(status_code=409, detail="A key with this name already exists")
+        except SecretKeyIsReferenceError:
+            raise HTTPException(
+                status_code=409,
+                detail="This key's type is inherited from its reference source — change it there instead.",
+            )
         await audit_service.record_user_action(
             session, actor, request,
             action="secret.update", object_type="secret_key", object_id=key.id,
             object_label=key.name, project_id=project_id,
         )
         await _auto_sync_github(session, actor, request, project_id)
-        return await _to_response(session, key)
+        return await _to_response(session, actor, key)
 
     async def delete_key(
         self,
@@ -308,6 +416,11 @@ class SecretRouter(Endpoint):
                 detail="This secret is used as the personal access token for a GitHub sync target "
                 "— remove or reconfigure that sync target first.",
             )
+        except SecretKeyInUseAsReferenceSourceError:
+            raise HTTPException(
+                status_code=409,
+                detail="Another key still references this secret's value — remove that reference first.",
+            )
         await audit_service.record_user_action(
             session, actor, request,
             action="secret.delete", object_type="secret_key", object_id=key_id_copy,
@@ -328,14 +441,22 @@ class SecretRouter(Endpoint):
         if not projects_service.can_edit(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot edit this project")
         key = await self._key_or_404(session, project_id, key_id)
-        key = await secrets_service.set_value(session, key, plaintext=payload.value, updated_by=actor.id)
+        try:
+            key = await secrets_service.set_value(
+                session, key, plaintext=payload.value, updated_by=actor.id
+            )
+        except SecretKeyIsReferenceError:
+            raise HTTPException(
+                status_code=409,
+                detail="This key's value can only be changed in its source project.",
+            )
         await audit_service.record_user_action(
             session, actor, request,
             action="secret.value_set", object_type="secret_key", object_id=key.id,
             object_label=key.name, project_id=project_id,
         )
         await _auto_sync_github(session, actor, request, project_id)
-        return await _to_response(session, key)
+        return await _to_response(session, actor, key)
 
     async def reveal_value(
         self,
@@ -347,10 +468,13 @@ class SecretRouter(Endpoint):
     ) -> SecretRevealResponse:
         project, _share = await self._project_or_404(session, actor, project_id)
         key = await self._key_or_404(session, project_id, key_id)
+        # Resolved — a reference to an ENVIRONMENT-type source is exactly as visible as a normal
+        # environment variable, regardless of this row's own (irrelevant) variable_type column.
+        variable_type, _ciphertext = await secrets_service.resolve_effective(session, key)
         # An "environment" variable is already visible to anyone who can view the Project (its
         # value ships straight in the list response) — only a "secret" needs the stricter
         # owner/admin-only can_reveal gate.
-        if key.variable_type == VariableType.SECRET and not projects_service.can_reveal(actor, project):
+        if variable_type == VariableType.SECRET and not projects_service.can_reveal(actor, project):
             raise HTTPException(status_code=403, detail="Only the project owner or an admin may reveal values")
         environment = await environments_service.get_environment(session, key.environment_id)
         try:

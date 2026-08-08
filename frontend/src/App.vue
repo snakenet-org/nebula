@@ -7,8 +7,9 @@
     `/projects/<id>` and `/projects/<id>/settings` are this app's two path-param routes, parsed out
     of `path.value` by regex since there's no vue-router — the matched id is passed down as a
     `project-id` prop; `undefined` (not null) when absent so Vue omits the attribute entirely for
-    every other view. On window/tab focus, OIDC sessions are silently refreshed; only a failed
-    refresh routes to login (local sessions without a refresh token are left untouched).
+    every other view. On window/tab focus, any authenticated session (local or OIDC) is silently
+    refreshed via useAuth.refreshSession() — see that composable for how each kind actually refreshes
+    and, for OIDC, its 24h absolute session cap.
     The nav rail is built from shadcn-vue Button/Tooltip/Separator/Avatar primitives (icon-only by
     default, `sidebarExpanded` starts `false` on every load, deliberately not persisted — "always
     collapsed" per product ask) rather than shadcn-vue's own canned "Sidebar" block — that registry
@@ -28,9 +29,9 @@
     the button reclaims a full row of vertical space for the page content above it.
   @dependencies: vue, @phosphor-icons/vue, vue-sonner, shadcn-vue (button, tooltip, separator,
     avatar, sonner)
-  @version: 5.0.2
+  @version: 5.1.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-06
+  @date: 2026-08-09
 -->
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
@@ -132,10 +133,14 @@ async function doLogout() {
 }
 
 // ── Focus-triggered token refresh ─────────────────────────────────────────
+// Covers both session kinds: a backgrounded/frozen tab's proactive refresh timer may never fire in
+// time, so a catch-up refresh on return-to-foreground is the safety net for either (local sessions
+// lean on the server's own 15-minute post-expiry grace window here; OIDC sessions on Authentik's
+// refresh_token still being valid and the 24h session cap not yet elapsed).
 let _refreshingOnFocus = false;
 async function _handleVisibilityChange() {
   if (document.visibilityState !== 'visible') return;
-  if (!auth.session?.refreshToken || _refreshingOnFocus) return;
+  if (!auth.session?.token || _refreshingOnFocus) return;
   _refreshingOnFocus = true;
   await refreshSession();
   _refreshingOnFocus = false;

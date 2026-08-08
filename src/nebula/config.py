@@ -15,9 +15,9 @@
   - Read config ONLY through `settings`; do not scatter os.getenv across the codebase.
   - Maintain 100% type-hinting coverage.
 @dependencies: python-dotenv
-@version: 1.0.0
+@version: 1.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-05
+@date: 2026-08-09
 """
 
 import os
@@ -61,6 +61,13 @@ class Settings:
     # ── Local username/password login (HS256 session tokens — the optional admin login) ────
     jwt_secret: str = field(default_factory=lambda: os.getenv("NEBULA_JWT_SECRET", ""))
     jwt_ttl: int = field(default_factory=lambda: int(os.getenv("NEBULA_JWT_TTL", "3600")))
+    # How long past its own `exp` a local token may still be silently refreshed (POST
+    # /api/v1/auth/refresh) instead of forcing a full re-login — covers a backgrounded/frozen tab
+    # that missed its proactive refresh, mirroring the same class of gap Gravity's own idle-TTL
+    # journal entry documents for the browser-timer-vs-frozen-tab case.
+    jwt_refresh_grace: int = field(
+        default_factory=lambda: int(os.getenv("NEBULA_JWT_REFRESH_GRACE", "900"))
+    )
     admin_user: str = field(default_factory=lambda: os.getenv("NEBULA_ADMIN_USER", ""))
     admin_pass: str = field(default_factory=lambda: os.getenv("NEBULA_ADMIN_PASS", ""))
     admin_email: str = field(default_factory=lambda: os.getenv("NEBULA_ADMIN_EMAIL", ""))

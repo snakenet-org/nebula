@@ -1,14 +1,16 @@
 // @ai-purpose: Authenticated client for the protected Nebula API.
 // @ai-context: Every protected route requires BOTH gates: Authorization: Bearer <jwt> and
 //   X-Nebula-Token: <shared secret>. Both come from the session stored by useAuth. On 401 a single
-//   silent token-refresh is attempted (OIDC sessions only); if that succeeds the original request is
-//   retried transparently. Only when the refresh itself also fails is the caller logged out. A
-//   module-level lock (_refreshPromise) prevents concurrent refresh races when multiple in-flight
-//   requests all 401 at the same time. Mirrors Satellite's services/api.js request/parseResponse
-//   shape, with thin per-route helpers for projects/environments/secrets/access keys.
-// @version: 2.2.0
+//   silent token-refresh is attempted — useAuth.refreshSession() dispatches to the right mechanism
+//   for either session kind (local: POST /api/v1/auth/refresh; OIDC: Authentik's refresh_token
+//   grant) — and if that succeeds the original request is retried transparently. Only when the
+//   refresh itself also fails is the caller logged out. A module-level lock (_refreshPromise)
+//   prevents concurrent refresh races when multiple in-flight requests all 401 at the same time.
+//   Mirrors Satellite's services/api.js request/parseResponse shape, with thin per-route helpers
+//   for projects/environments/secrets/access keys.
+// @version: 2.3.0
 // @author: Marc Fiedler <marc@snakenet.org>
-// @date: 2026-08-06
+// @date: 2026-08-09
 import { useAuth } from '../composables/useAuth';
 
 let _refreshPromise = null;

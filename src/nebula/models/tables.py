@@ -13,7 +13,18 @@
   nebula.secrets.update_key, never many-at-once — `ciphertext` is a Fernet token from
   nebula.crypto.encrypt_value, nullable only because a key can exist before its value is first set;
   NEVER store a plaintext value anywhere, this column and its ORM attribute are the only place a
-  secret's actual content lives at rest) — ProjectGithubSync (a Project may have MANY simultaneous
+  secret's actual content lives at rest. Since 2026-08-09, a key's value can ALSO be a REFERENCE to
+  another SecretKey elsewhere in the vault (`source_key_id`, FK ON DELETE RESTRICT — same shape as
+  ProjectGithubSync.pat_source_key_id below, generalized from "a sync target's PAT" to "any key's
+  value") — a reference row's own `ciphertext` is always NULL
+  (`ck_secret_keys_reference_no_own_value`) and `variable_type`/value are resolved LIVE from the
+  referenced key at every read (nebula.secrets.resolve_effective) rather than copied, so rotating the
+  source anywhere in the vault is picked up immediately with nothing to re-save on this row. No
+  chaining — a key already carrying a `source_key_id` can never itself be referenced (enforced at
+  create time, nebula.secrets/api/v1/secret.py, not by the schema). `name`/`description`/
+  `environment_id`/`sync_enabled` stay this row's OWN, independently editable metadata regardless of
+  reference mode — only the value/type are locked to the source.) — ProjectGithubSync (a Project may
+  have MANY simultaneous
   GitHub sync targets since the 2026-08-06 multi-repo redesign — see nebula.github_sync; each row is
   its own repo_url + enabled flag + last-run status, `project_id` FK CASCADE, plus its PAT config).
   Since 2026-08-08, a target's PAT is EITHER a `pat_ciphertext` it owns directly (the "custom" mode,
@@ -38,11 +49,15 @@
   - Never let `pat_ciphertext` and `pat_source_key_id` both be set (or both be unset) on the same
     ProjectGithubSync row — the DB CHECK constraint is a backstop, but nebula.github_sync's own CRUD
     functions must keep them mutually exclusive too.
+  - Never let `SecretKey.source_key_id` and `.ciphertext` both be set on the same row (backstopped
+    by `ck_secret_keys_reference_no_own_value`, enforced app-side in nebula.secrets) — and never let
+    a key that already has a `source_key_id` be picked as ANOTHER key's `source_key_id` (no
+    chaining) or as its own (backstopped by `ck_secret_keys_reference_not_self`).
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 5.0.0
+@version: 6.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-08
+@date: 2026-08-09
 """
 
 import enum
@@ -163,6 +178,17 @@ class SecretKey(Base):
             text("lower(name)"),
             unique=True,
         ),
+        # A reference row never owns a ciphertext of its own — see source_key_id below — and can
+        # never reference itself. Mirrors ck_project_github_syncs_pat_xor's shape, one CHECK per
+        # invariant instead of one combined expression for a clearer constraint-violation message.
+        CheckConstraint(
+            "source_key_id IS NULL OR ciphertext IS NULL",
+            name="ck_secret_keys_reference_no_own_value",
+        ),
+        CheckConstraint(
+            "source_key_id IS NULL OR source_key_id <> id",
+            name="ck_secret_keys_reference_not_self",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -183,8 +209,21 @@ class SecretKey(Base):
         String(11), default=VariableType.SECRET, nullable=False
     )
     # A Fernet token (nebula.crypto.encrypt_value) — never a plaintext value. Nullable: a key can
-    # exist before its value is first set.
+    # exist before its value is first set, OR (since 2026-08-09) because it's a reference — see
+    # source_key_id below, always NULL together with this column (ck_secret_keys_reference_no_own_value).
     ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # "Reference" mode: this key's own value/type are resolved LIVE from the pointed-at SecretKey on
+    # every read (nebula.secrets.resolve_effective) instead of stored here — rotating the source
+    # anywhere in the vault takes effect immediately, nothing to re-save on this row. RESTRICT (not
+    # CASCADE/SET NULL) so deleting a still-referenced key fails loudly rather than silently orphaning
+    # every key that points at it. No chaining: a key that itself has source_key_id set may never be
+    # picked as another key's source (enforced in nebula.secrets/api/v1/secret.py, not the schema).
+    # `name`/`description`/`environment_id`/`sync_enabled` are unaffected — a reference key keeps its
+    # own independently-editable identity in THIS project; only the value/type are locked to the
+    # source project.
+    source_key_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("secret_keys.id", ondelete="RESTRICT"), nullable=True
+    )
     # Per-key on/off toggle for GitHub sync (nebula.github_sync) — a disabled key is skipped by every
     # sync target's push, both the automatic on-change hook and a manual "Sync now". Defaults true so
     # a key behaves exactly as before this column existed unless explicitly turned off.

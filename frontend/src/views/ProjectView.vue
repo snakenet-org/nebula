@@ -66,15 +66,37 @@
     read-only "synced"/"paused" Badge instead, same Select-vs-Badge split canEdit already uses for the
     Environment column. Turning sync off only stops FUTURE pushes (nebula.github_sync.sync_to_github
     now skips the key) — it never retroactively removes a value already pushed to a linked repo.
-  @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input, label,
-    select, switch, table, popover, checkbox, alert-dialog, dialog, skeleton)
-  @version: 6.3.0
+    2026-08-09: the "New key" form's value section is now a `newKeyValueMode` Tabs toggle ("Set
+    value" / "Reference a secret", same Tabs pattern as ProjectSettingsView's GitHub sync PAT
+    picker) instead of a plain Type Select + Value Input — "Reference a secret" is a two-step
+    Project→Secret Select pair (`referenceSourceProjects`/`referenceSourceKeys`, lazily loaded on
+    first use), filtered client-side to owner/admin projects OTHER than this one and to non-reference
+    keys (no chaining) — the backend independently re-enforces all of this, these filters just keep
+    the picker from ever offering an option the API would reject. Submitting sends
+    `source_key_id` instead of `variable_type`/`value`; the created key's type/value are then always
+    resolved server-side from the source (api/v1/secret.py's `_to_response`), so no `variable_type`
+    round-trips back from this form at all in reference mode. A reference key renders an extra
+    `accent` "reference" Badge next to its type Badge, plus a small linked subtitle
+    ("References <project> / <key> — only changeable there", `key.source_label`/
+    `key.source_project_id`) below its description — clicking it navigates to the source Project.
+    Its per-row "Set value" popover is hidden entirely (`canEdit && !key.source_key_id`) — the value
+    can only ever be changed by editing the source key, in its own Project — while environment
+    reassignment, the Sync toggle, and Edit (rename/description) all stay exactly as editable as any
+    other key, since those are this row's own local metadata. The delete AlertDialog/toast now read
+    differently for a reference key ("Remove this reference?" / "Reference removed.") than a normal
+    one, to make explicit that deleting a reference only ever removes this project's link to it, not
+    the source key itself. Separately, the "Rename key" Dialog is now "Edit key" and also edits
+    `description` (a new Textarea) in the same submit, not just `name` — was previously name-only,
+    even though SecretKey.description could already be set at creation.
+  @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
+    textarea, label, select, switch, tabs, table, popover, checkbox, alert-dialog, dialog, skeleton)
+  @version: 7.0.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-08
+  @date: 2026-08-09
 -->
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue';
-import { PhArrowLeft, PhCheck, PhCopy, PhEye, PhEyeSlash, PhGear, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhX } from '@phosphor-icons/vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { PhArrowLeft, PhCheck, PhCopy, PhEye, PhEyeSlash, PhGear, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhX } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { parseEnvFile } from '../lib/envFile';
@@ -83,11 +105,13 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -142,19 +166,90 @@ const showKeyForm = ref(false);
 const emptyNewKey = () => ({ name: '', description: '', environment_id: '', variable_type: 'secret', value: '' });
 const newKey = ref(emptyNewKey());
 const savingKey = ref(false);
+
+// ── New key: "reference a secret" picker ─────────────────────────────────
+// A key's value can come from another key elsewhere in the vault instead of being set directly —
+// same custom-vs-reference Tabs shape as ProjectSettingsView's GitHub sync PAT picker. Referencing
+// is explicitly cross-project, so the current project is excluded from the picker; the backend
+// independently re-enforces both that and the owner/admin (can_reveal) bar on the source project —
+// these filters just keep the picker from ever offering an option the API would reject.
+const newKeyValueMode = ref('direct'); // 'direct' | 'reference'
+const referenceSourceProjects = ref([]);
+const loadingReferenceSourceProjects = ref(false);
+const referenceSourceKeys = ref([]);
+const loadingReferenceSourceKeys = ref(false);
+const referenceSourceProjectId = ref('');
+const referenceSourceKeyId = ref('');
+
+async function ensureReferenceSourceProjectsLoaded() {
+  if (referenceSourceProjects.value.length || loadingReferenceSourceProjects.value) return;
+  loadingReferenceSourceProjects.value = true;
+  try {
+    const all = await api.listProjects();
+    referenceSourceProjects.value = all.filter(
+      (p) => p.id !== props.projectId && ['owner', 'admin'].includes(p.my_role)
+    );
+  } catch (e) {
+    toast.error(e.message);
+  } finally {
+    loadingReferenceSourceProjects.value = false;
+  }
+}
+async function loadReferenceSourceKeys(projectId) {
+  if (!projectId) {
+    referenceSourceKeys.value = [];
+    return;
+  }
+  loadingReferenceSourceKeys.value = true;
+  try {
+    const ks = await api.listSecrets(projectId);
+    // No chaining — a key that's itself a reference can't be referenced again (the backend rejects
+    // this too; filtering here just keeps the picker from offering an invalid option).
+    referenceSourceKeys.value = ks.filter((k) => !k.source_key_id);
+  } catch (e) {
+    toast.error(e.message);
+    referenceSourceKeys.value = [];
+  } finally {
+    loadingReferenceSourceKeys.value = false;
+  }
+}
+watch(newKeyValueMode, (mode) => {
+  if (mode === 'reference') ensureReferenceSourceProjectsLoaded();
+});
+watch(referenceSourceProjectId, (projectId) => {
+  referenceSourceKeyId.value = '';
+  loadReferenceSourceKeys(projectId);
+});
+function resetNewKeyForm() {
+  newKey.value = emptyNewKey();
+  newKeyValueMode.value = 'direct';
+  referenceSourceProjectId.value = '';
+  referenceSourceKeyId.value = '';
+  referenceSourceKeys.value = [];
+}
+
 async function addKey() {
   if (!newKey.value.name.trim() || !newKey.value.environment_id) return;
+  if (newKeyValueMode.value === 'reference' && !referenceSourceKeyId.value) {
+    toast.error('Pick a project and a secret to reference.');
+    return;
+  }
   savingKey.value = true;
   try {
-    const key = await api.createSecret(props.projectId, {
+    const payload = {
       name: newKey.value.name.trim(),
       description: newKey.value.description.trim() || null,
       environment_id: newKey.value.environment_id,
-      variable_type: newKey.value.variable_type,
-      value: newKey.value.value || null,
-    });
+    };
+    if (newKeyValueMode.value === 'reference') {
+      payload.source_key_id = referenceSourceKeyId.value;
+    } else {
+      payload.variable_type = newKey.value.variable_type;
+      payload.value = newKey.value.value || null;
+    }
+    const key = await api.createSecret(props.projectId, payload);
     keys.value.push(key);
-    newKey.value = emptyNewKey();
+    resetNewKeyForm();
     showKeyForm.value = false;
   } catch (e) {
     toast.error(e.message);
@@ -249,13 +344,20 @@ async function reassignEnvironment(key, environmentId) {
 // Off just means "skip this key on every future push" (nebula.github_sync.sync_to_github) — it
 // does NOT remove a value already pushed to a linked repo, same push-only/no-deletion behavior a
 // deleted key already has.
+// `syncingToggle` holds the id of whichever key's toggle is mid-request — every toggle in the
+// table disables while it's set (not just the one clicked), so a user can't queue up multiple
+// overlapping sync_enabled writes by clicking several rows in quick succession.
+const syncingToggle = ref(null);
 async function toggleSync(key, enabled) {
+  syncingToggle.value = key.id;
   try {
     const updated = await api.updateSecret(props.projectId, key.id, { sync_enabled: enabled });
     const idx = keys.value.findIndex((k) => k.id === updated.id);
     if (idx !== -1) keys.value[idx] = updated;
   } catch (e) {
     toast.error(e.message);
+  } finally {
+    syncingToggle.value = null;
   }
 }
 
@@ -282,7 +384,10 @@ async function deleteKey() {
   try {
     await api.deleteSecret(props.projectId, target.id);
     keys.value = keys.value.filter((k) => k.id !== target.id);
-    toast.success('Key deleted.');
+    // A reference key's row IS the reference — deleting it only ever removes this project's link
+    // to the source key, never the source key itself (a plain row delete can't cascade upward to
+    // whatever it points at).
+    toast.success(target.source_key_id ? 'Reference removed.' : 'Key deleted.');
   } catch (e) {
     toast.error(e.message);
   } finally {
@@ -290,14 +395,16 @@ async function deleteKey() {
   }
 }
 
-// ── Rename key ────────────────────────────────────────────────────────────
+// ── Edit key (name + description) ────────────────────────────────────────
 const renameDialogOpen = ref(false);
 const renameTargetKey = ref(null);
 const renameValue = ref('');
+const renameDescription = ref('');
 const renamingKey = ref(false);
 function openRenameDialog(key) {
   renameTargetKey.value = key;
   renameValue.value = key.name;
+  renameDescription.value = key.description || '';
   renameDialogOpen.value = true;
 }
 async function saveRename() {
@@ -306,10 +413,13 @@ async function saveRename() {
   if (!target || !name) return;
   renamingKey.value = true;
   try {
-    const updated = await api.updateSecret(props.projectId, target.id, { name });
+    const updated = await api.updateSecret(props.projectId, target.id, {
+      name,
+      description: renameDescription.value.trim() || null,
+    });
     const idx = keys.value.findIndex((k) => k.id === updated.id);
     if (idx !== -1) keys.value[idx] = updated;
-    toast.success('Key renamed.');
+    toast.success('Key updated.');
     renameDialogOpen.value = false;
   } catch (e) {
     toast.error(e.message);
@@ -457,39 +567,89 @@ async function saveValue() {
 
       <Card v-if="showKeyForm" class="mb-4">
         <CardContent>
-          <form @submit.prevent="addKey" class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div class="space-y-1.5">
-              <Label for="new-key-name">Name</Label>
-              <Input id="new-key-name" v-model="newKey.name" placeholder="KEY_NAME" required />
+          <form @submit.prevent="addKey" class="space-y-4">
+            <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div class="space-y-1.5">
+                <Label for="new-key-name">Name</Label>
+                <Input id="new-key-name" v-model="newKey.name" placeholder="KEY_NAME" required />
+              </div>
+              <div class="space-y-1.5">
+                <Label for="new-key-description">Description</Label>
+                <Input id="new-key-description" v-model="newKey.description" placeholder="Description (optional)" />
+              </div>
+              <div class="space-y-1.5">
+                <Label for="new-key-env">Environment</Label>
+                <Select v-model="newKey.environment_id">
+                  <SelectTrigger id="new-key-env" class="w-full"><SelectValue placeholder="Choose one" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div class="space-y-1.5">
-              <Label for="new-key-description">Description</Label>
-              <Input id="new-key-description" v-model="newKey.description" placeholder="Description (optional)" />
-            </div>
-            <div class="space-y-1.5">
-              <Label for="new-key-env">Environment</Label>
-              <Select v-model="newKey.environment_id">
-                <SelectTrigger id="new-key-env" class="w-full"><SelectValue placeholder="Choose one" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="space-y-1.5">
-              <Label for="new-key-type">Type</Label>
-              <Select v-model="newKey.variable_type">
-                <SelectTrigger id="new-key-type" class="w-full"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="secret">Secret</SelectItem>
-                  <SelectItem value="environment">Environment variable</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div class="sm:col-span-2 lg:col-span-4 space-y-1.5">
-              <Label for="new-key-value">Value (optional)</Label>
-              <Input id="new-key-value" v-model="newKey.value" placeholder="Leave blank to set a value later" class="font-mono" />
-            </div>
-            <div class="sm:col-span-2 lg:col-span-4 flex gap-2 justify-end">
+
+            <Tabs v-model="newKeyValueMode">
+              <TabsList class="w-full max-w-md">
+                <TabsTrigger value="direct" class="flex-1">Set value</TabsTrigger>
+                <TabsTrigger value="reference" class="flex-1">Reference a secret</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="direct" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-3">
+                <div class="space-y-1.5">
+                  <Label for="new-key-type">Type</Label>
+                  <Select v-model="newKey.variable_type">
+                    <SelectTrigger id="new-key-type" class="w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="secret">Secret</SelectItem>
+                      <SelectItem value="environment">Environment variable</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div class="sm:col-span-2 space-y-1.5">
+                  <Label for="new-key-value">Value (optional)</Label>
+                  <Input id="new-key-value" v-model="newKey.value" placeholder="Leave blank to set a value later" class="font-mono" />
+                </div>
+              </TabsContent>
+
+              <TabsContent value="reference" class="space-y-3 pt-3">
+                <div class="grid sm:grid-cols-2 gap-3">
+                  <div class="space-y-1.5">
+                    <Label>Project</Label>
+                    <Select v-model="referenceSourceProjectId">
+                      <SelectTrigger class="w-full"><SelectValue placeholder="Select a project…" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem v-for="p in referenceSourceProjects" :key="p.id" :value="p.id">{{ p.name }}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p v-if="!loadingReferenceSourceProjects && !referenceSourceProjects.length" class="text-muted-foreground text-xs">
+                      You need to own or administer another project to reference one of its secrets.
+                    </p>
+                  </div>
+                  <div class="space-y-1.5">
+                    <Label>Secret</Label>
+                    <Select v-model="referenceSourceKeyId" :disabled="!referenceSourceProjectId || loadingReferenceSourceKeys">
+                      <SelectTrigger class="w-full"><SelectValue placeholder="Select a secret…" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem v-for="k in referenceSourceKeys" :key="k.id" :value="k.id">{{ k.name }}</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p
+                      v-if="referenceSourceProjectId && !loadingReferenceSourceKeys && !referenceSourceKeys.length"
+                      class="text-muted-foreground text-xs"
+                    >
+                      That project has no keys to reference yet.
+                    </p>
+                  </div>
+                </div>
+                <p class="text-muted-foreground text-xs">
+                  This key will always mirror the referenced secret's current type and value — it can
+                  only be changed in its source project, but it can still be renamed, reassigned to a
+                  different environment here, and synced to GitHub like any other key.
+                </p>
+              </TabsContent>
+            </Tabs>
+
+            <div class="flex gap-2 justify-end">
               <Button type="button" variant="outline" @click="showKeyForm = false">Cancel</Button>
               <Button type="submit" :disabled="savingKey || !newKey.environment_id">Create</Button>
             </div>
@@ -522,11 +682,26 @@ async function saveValue() {
                   <Badge :variant="key.variable_type === 'secret' ? 'warning' : 'info'" class="text-[0.65rem] px-1.5 py-0">
                     {{ key.variable_type === 'secret' ? 'secret' : 'env var' }}
                   </Badge>
-                  <Button v-if="canEdit" variant="ghost" size="icon-xs" title="Rename key" @click="openRenameDialog(key)">
+                  <Badge v-if="key.source_key_id" variant="accent" class="text-[0.65rem] px-1.5 py-0">
+                    <PhLink :size="10" weight="bold" /> reference
+                  </Badge>
+                  <Button v-if="canEdit" variant="ghost" size="icon-xs" title="Edit key" @click="openRenameDialog(key)">
                     <PhPencilSimple :size="12" weight="bold" />
                   </Button>
                 </div>
                 <div v-if="key.description" class="text-muted-foreground text-xs mt-0.5">{{ key.description }}</div>
+                <div v-if="key.source_key_id" class="text-muted-foreground text-xs mt-0.5 flex items-center gap-1">
+                  <PhLink :size="11" weight="bold" class="shrink-0" />
+                  <button
+                    v-if="key.source_label && key.source_project_id"
+                    type="button"
+                    class="underline decoration-dotted hover:text-foreground text-left"
+                    @click="emit('navigate', `/projects/${key.source_project_id}`)"
+                  >
+                    References {{ key.source_label }} — only changeable there
+                  </button>
+                  <span v-else>References a secret you no longer have access to</span>
+                </div>
               </TableCell>
               <TableCell class="align-top">
                 <Select
@@ -572,7 +747,7 @@ async function saveValue() {
                   </Button>
 
                   <Popover
-                    v-if="canEdit"
+                    v-if="canEdit && !key.source_key_id"
                     :open="editingKeyId === key.id"
                     @update:open="(v) => !v && closeEditor()"
                   >
@@ -598,6 +773,7 @@ async function saveValue() {
                 <Switch
                   v-if="canEdit"
                   :model-value="key.sync_enabled"
+                  :disabled="syncingToggle !== null"
                   :title="key.sync_enabled ? 'Synced to GitHub — click to pause' : 'Not synced to GitHub — click to resume'"
                   @update:model-value="(v) => toggleSync(key, v)"
                 />
@@ -687,14 +863,19 @@ async function saveValue() {
     <AlertDialog :open="deleteKeyDialogOpen" @update:open="(v) => (deleteKeyDialogOpen = v)">
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete this key?</AlertDialogTitle>
-          <AlertDialogDescription>
+          <AlertDialogTitle>{{ confirmDeleteKey?.source_key_id ? 'Remove this reference?' : 'Delete this key?' }}</AlertDialogTitle>
+          <AlertDialogDescription v-if="confirmDeleteKey?.source_key_id">
+            This only removes '{{ confirmDeleteKey?.name }}' from this project — the secret it
+            references ({{ confirmDeleteKey?.source_label || 'in its source project' }}) is not
+            affected and is not deleted.
+          </AlertDialogDescription>
+          <AlertDialogDescription v-else>
             This permanently removes '{{ confirmDeleteKey?.name }}' and its value. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" @click="deleteKey">Delete</AlertDialogAction>
+          <AlertDialogAction variant="destructive" @click="deleteKey">{{ confirmDeleteKey?.source_key_id ? 'Remove reference' : 'Delete' }}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -702,13 +883,17 @@ async function saveValue() {
     <Dialog :open="renameDialogOpen" @update:open="(v) => (renameDialogOpen = v)">
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Rename key</DialogTitle>
+          <DialogTitle>Edit key</DialogTitle>
           <DialogDescription>References to '{{ renameTargetKey?.name }}' by name (e.g. external API lookups) must be updated separately.</DialogDescription>
         </DialogHeader>
         <form @submit.prevent="saveRename" class="space-y-3">
           <div class="space-y-1.5">
             <Label for="rename-key-name">Name</Label>
             <Input id="rename-key-name" v-model="renameValue" required class="uppercase font-mono" />
+          </div>
+          <div class="space-y-1.5">
+            <Label for="rename-key-description">Description</Label>
+            <Textarea id="rename-key-description" v-model="renameDescription" placeholder="Description (optional)" rows="3" />
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" @click="renameDialogOpen = false">Cancel</Button>
