@@ -24,13 +24,23 @@
   list_failed_retrievals/the Dashboard's api_requests+failed_attempts series all aggregate across
   the whole set rather than /secret alone, since "any call to any vault route" is the unit both the
   Audit Logs page and the Dashboard now count.
+  EXTRACTION_ACTIONS (2026-08-09) is the narrower "this SecretKey's value actually left the vault"
+  pair — "secret.reveal" (a human, api/v1/secret.py's reveal_value) and "vault.retrieve" (a Project
+  access key, api/v1/vault.py's get_secret) — backing extraction_counts_by_project/
+  extraction_count_for_key, the per-key "how many times has this been extracted" used by
+  ProjectView.vue's key-row info/warning icon. Only success=True rows count — a failed reveal/
+  retrieve (no value set, wrong environment, ...) never actually extracted anything. vault.py's
+  get_secret now sets object_id=secret_key.id on every audit row where the key resolved (previously
+  only object_label, a display string), same as secret.py's reveal_value already did — required for
+  either action to be attributable to a specific key by id rather than by fragile name matching
+  that would break silently across a rename.
 @ai-rules:
   - Never put a plaintext secret value in `detail` or any other column.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 1.1.0
+@version: 1.2.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-07
+@date: 2026-08-09
 """
 
 import uuid
@@ -45,6 +55,9 @@ from nebula.models.tables import ActorType, AuditLogEntry, UserAccount
 
 # Every api/v1/vault.py route's action string — see the module docstring above.
 VAULT_ACTIONS: tuple[str, ...] = ("vault.retrieve", "vault.project", "vault.status")
+
+# The two actions that mean "a SecretKey's value actually left the vault" — see the module docstring.
+EXTRACTION_ACTIONS: tuple[str, ...] = ("secret.reveal", "vault.retrieve")
 
 
 def _client_ip(request: Request | None) -> str | None:
@@ -122,6 +135,7 @@ async def record_access_key_action(
     request: Request | None,
     action: str,
     object_type: str | None = None,
+    object_id: uuid.UUID | None = None,
     object_label: str | None = None,
     project_id: uuid.UUID | None = None,
     success: bool,
@@ -135,6 +149,7 @@ async def record_access_key_action(
         actor_label=access_key_label,
         action=action,
         object_type=object_type,
+        object_id=object_id,
         object_label=object_label,
         project_id=project_id,
         success=success,
@@ -215,3 +230,36 @@ async def daily_counts(
         today - timedelta(days=offset): counts.get(today - timedelta(days=offset), 0)
         for offset in range(days - 1, -1, -1)
     }
+
+
+async def extraction_counts_by_project(
+    session: AsyncSession, project_id: uuid.UUID
+) -> dict[uuid.UUID, int]:
+    """Per-key successful-extraction counts for every SecretKey in `project_id`, one query — backs
+    the Project view's per-key info/warning icon. A key with zero extractions is simply absent from
+    the returned dict (callers should `.get(key_id, 0)`)."""
+    result = await session.execute(
+        select(AuditLogEntry.object_id, func.count())
+        .where(
+            AuditLogEntry.project_id == project_id,
+            AuditLogEntry.object_type == "secret_key",
+            AuditLogEntry.action.in_(EXTRACTION_ACTIONS),
+            AuditLogEntry.success.is_(True),
+        )
+        .group_by(AuditLogEntry.object_id)
+    )
+    return {row[0]: row[1] for row in result.all() if row[0] is not None}
+
+
+async def extraction_count_for_key(session: AsyncSession, key_id: uuid.UUID) -> int:
+    """Successful-extraction count for a single key — see extraction_counts_by_project, used instead
+    when only one key's response is being built (create/update/set_value), not a whole list."""
+    result = await session.execute(
+        select(func.count()).where(
+            AuditLogEntry.object_id == key_id,
+            AuditLogEntry.object_type == "secret_key",
+            AuditLogEntry.action.in_(EXTRACTION_ACTIONS),
+            AuditLogEntry.success.is_(True),
+        )
+    )
+    return result.scalar_one()

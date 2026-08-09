@@ -46,15 +46,22 @@
   (the access key already resolved to exactly one Project via get_access_key's own 401 gate), so
   unlike /secret there's only ever a single, success=True audit row (action="vault.project",
   object_type="project") — never a 404/failure branch to log.
+  get_secret's audit rows now also carry object_id=secret_key.id whenever the key resolved (added
+  2026-08-09) — previously only object_label (a display string), which made this route's
+  "vault.retrieve" rows impossible to reliably attribute to one SecretKey by id (a renamed key would
+  silently orphan its older rows). This is what lets nebula.audit.extraction_counts_by_project count
+  machine (access-key) extractions per key, alongside secret.py's "secret.reveal", for
+  ProjectView.vue's per-key extraction icon.
 @ai-rules:
   - Never log the resolved plaintext value.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 5.0.0
+@version: 5.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-07
+@date: 2026-08-09
 """
 
+import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -132,7 +139,9 @@ class VaultRouter(Endpoint):
     ) -> VaultSecretResponse:
         resolved_project, access_key = resolved
 
-        async def _audit(*, success: bool, detail: str | None = None) -> None:
+        async def _audit(
+            *, success: bool, object_id: uuid.UUID | None = None, detail: str | None = None
+        ) -> None:
             await audit_service.record_access_key_action(
                 session,
                 access_key_id=access_key.id,
@@ -140,6 +149,7 @@ class VaultRouter(Endpoint):
                 request=request,
                 action="vault.retrieve",
                 object_type="secret_key",
+                object_id=object_id,
                 object_label=f"{resolved_project.name}/{environment}/{key}",
                 project_id=resolved_project.id,
                 success=success,
@@ -155,16 +165,16 @@ class VaultRouter(Endpoint):
         # must match it (case-insensitively), same anti-enumeration 404 as every other lookup miss.
         env = await environments_service.get_environment(session, secret_key.environment_id)
         if env.name.lower() != environment.lower():
-            await _audit(success=False, detail="Environment mismatch")
+            await _audit(success=False, object_id=secret_key.id, detail="Environment mismatch")
             raise HTTPException(status_code=404, detail="Not found")
 
         try:
             value = await secrets_service.reveal_value(session, secret_key)
         except SecretValueNotFoundError:
-            await _audit(success=False, detail="No value set")
+            await _audit(success=False, object_id=secret_key.id, detail="No value set")
             raise HTTPException(status_code=404, detail="Not found")
 
-        await _audit(success=True)
+        await _audit(success=True, object_id=secret_key.id)
         return VaultSecretResponse(key=secret_key.name, environment=env.name, value=value)
 
     async def get_status(

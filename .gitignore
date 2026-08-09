@@ -3,6 +3,7 @@ CLAUDE.md
 
 # Environment
 .env
+.env-prod
 
 # Python
 __pycache__/

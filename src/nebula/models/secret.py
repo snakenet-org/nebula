@@ -30,7 +30,13 @@
   `source_label` are its resolved display info — populated only when the CURRENT viewer can actually
   see that other Project (nebula.projects.can_view), same display-vs-permission split as
   ProjectGithubSyncTargetResponse's `pat_source_label` in models/project.py.
-@version: 4.0.0
+  `extraction_count` (2026-08-09) — how many times this key's value has actually been retrieved
+  (nebula.audit.EXTRACTION_ACTIONS: a human's "secret.reveal" + a Project access key's
+  "vault.retrieve", success=True only), computed by api/v1/secret.py's `_to_response` via
+  nebula.audit.extraction_counts_by_project (list_keys, one query for the whole page) or
+  extraction_count_for_key (single-key responses) — never stored on SecretKey itself. Backs
+  ProjectView.vue's per-key info ("extracted N times") / warning ("never extracted") icon.
+@version: 4.1.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-09
 """
@@ -125,6 +131,9 @@ class SecretKeyResponse(BaseModel):
     # display-vs-permission split as ProjectGithubSyncTargetResponse.pat_source_label.
     source_project_id: uuid.UUID | None = None
     source_label: str | None = None
+    # How many times this key's value has actually been retrieved (nebula.audit.EXTRACTION_ACTIONS,
+    # success=True only) — see the module docstring.
+    extraction_count: int
     created_at: datetime
     updated_at: datetime
 

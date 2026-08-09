@@ -50,6 +50,11 @@
   ordinary delete of just that row — it never touches (or even reveals visibility into) the source
   key it points at, since a FK delete only ever cascades/restricts downward, never upward to the row
   it references.
+  Since 2026-08-09, `_to_response` also resolves `extraction_count` (nebula.audit.EXTRACTION_ACTIONS —
+  see models/secret.py's docstring) — list_keys computes every key's count for the Project in one
+  bulk query (nebula.audit.extraction_counts_by_project) and passes each key's value in explicitly
+  to avoid an N+1 audit query per row; every other route builds a single-key response and lets
+  `_to_response` look its own count up individually (extraction_count_for_key).
 @ai-rules:
   - Never include SecretKey.ciphertext or a decrypted value in any response except reveal_value's.
   - A GitHub sync failure triggered by _auto_sync_github must never surface as an error response for
@@ -59,7 +64,7 @@
     existence/no-chaining checks as a substitute for that permission check.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 5.0.0
+@version: 5.1.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-09
 """
@@ -126,8 +131,12 @@ async def _auto_sync_github(
 
 
 async def _to_response(
-    session: AsyncSession, actor: UserAccount, key: SecretKey
+    session: AsyncSession, actor: UserAccount, key: SecretKey, *, extraction_count: int | None = None
 ) -> SecretKeyResponse:
+    # list_keys already computed the whole project's counts in one query and passes its value here;
+    # every other caller (a single-key response) looks its own key up individually.
+    if extraction_count is None:
+        extraction_count = await audit_service.extraction_count_for_key(session, key.id)
     environment = await environments_service.get_environment(session, key.environment_id)
     # Resolved — for a reference key this is the SOURCE key's CURRENT type/value, never this row's
     # own possibly-irrelevant columns (nebula.secrets.resolve_effective).
@@ -169,6 +178,7 @@ async def _to_response(
         source_key_id=key.source_key_id,
         source_project_id=source_project_id,
         source_label=source_label,
+        extraction_count=extraction_count,
         created_at=key.created_at,
         updated_at=key.updated_at,
     )
@@ -262,7 +272,11 @@ class SecretRouter(Endpoint):
     ) -> list[SecretKeyResponse]:
         await self._project_or_404(session, actor, project_id)
         rows = await secrets_service.list_keys(session, project_id)
-        return [await _to_response(session, actor, row) for row in rows]
+        counts = await audit_service.extraction_counts_by_project(session, project_id)
+        return [
+            await _to_response(session, actor, row, extraction_count=counts.get(row.id, 0))
+            for row in rows
+        ]
 
     async def create_key(
         self,

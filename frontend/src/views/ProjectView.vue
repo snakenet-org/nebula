@@ -88,15 +88,23 @@
     the source key itself. Separately, the "Rename key" Dialog is now "Edit key" and also edits
     `description` (a new Textarea) in the same submit, not just `name` — was previously name-only,
     even though SecretKey.description could already be set at creation.
+    2026-08-09 (later same day): each key row's name now leads with a small status icon —
+    `PhInfo` (text-info) when `key.extraction_count > 0`, native `title` reading "Extracted N times"
+    (matches this file's existing hover-hint convention — `title="Edit key"` etc. — rather than the
+    richer shadcn Tooltip, which would need its own local TooltipProvider since this view sits
+    outside App.vue's sidebar-only one); `PhWarning` (text-warning) otherwise, title "This key has
+    never been extracted". `extraction_count` is new on SecretKeyResponse (api/v1/secret.py +
+    nebula.audit.EXTRACTION_ACTIONS — a human's "secret.reveal" or an access key's "vault.retrieve",
+    success only) — no frontend computation involved, the count ships straight from listSecrets.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, popover, checkbox, alert-dialog, dialog, skeleton)
-  @version: 7.0.0
+  @version: 7.1.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-09
 -->
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { PhArrowLeft, PhCheck, PhCopy, PhEye, PhEyeSlash, PhGear, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhX } from '@phosphor-icons/vue';
+import { PhArrowLeft, PhCheck, PhCopy, PhEye, PhEyeSlash, PhGear, PhInfo, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhWarning, PhX } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { parseEnvFile } from '../lib/envFile';
@@ -678,6 +686,20 @@ async function saveValue() {
             <TableRow v-for="key in filteredKeys" :key="key.id">
               <TableCell class="align-top">
                 <div class="flex items-center gap-1.5">
+                  <PhInfo
+                    v-if="key.extraction_count > 0"
+                    :size="13"
+                    weight="bold"
+                    class="text-info shrink-0"
+                    :title="`Extracted ${key.extraction_count} time${key.extraction_count === 1 ? '' : 's'}`"
+                  />
+                  <PhWarning
+                    v-else
+                    :size="13"
+                    weight="bold"
+                    class="text-warning shrink-0"
+                    title="This key has never been extracted"
+                  />
                   <span class="font-mono font-semibold">{{ key.name }}</span>
                   <Badge :variant="key.variable_type === 'secret' ? 'warning' : 'info'" class="text-[0.65rem] px-1.5 py-0">
                     {{ key.variable_type === 'secret' ? 'secret' : 'env var' }}
