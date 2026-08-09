@@ -8,7 +8,7 @@
 //   prevents concurrent refresh races when multiple in-flight requests all 401 at the same time.
 //   Mirrors Satellite's services/api.js request/parseResponse shape, with thin per-route helpers
 //   for projects/environments/secrets/access keys.
-// @version: 2.3.0
+// @version: 2.4.0
 // @author: Marc Fiedler <marc@snakenet.org>
 // @date: 2026-08-09
 import { useAuth } from '../composables/useAuth';
@@ -84,6 +84,7 @@ export const getProject = (id) => request('GET', `/api/v1/project/${id}`);
 export const createProject = (payload) => request('POST', '/api/v1/project/', payload);
 export const updateProject = (id, payload) => request('PATCH', `/api/v1/project/${id}`, payload);
 export const deleteProject = (id) => request('DELETE', `/api/v1/project/${id}`);
+export const transferProject = (id, payload) => request('POST', `/api/v1/project/${id}/transfer`, payload);
 
 // ── GitHub sync (a Project may have many simultaneous sync targets) ────────
 export const listGithubTargets = (id) => request('GET', `/api/v1/project/${id}/github/targets`);

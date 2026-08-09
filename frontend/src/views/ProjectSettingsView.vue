@@ -46,15 +46,23 @@
     ProjectView.vue/EnvironmentsView.vue — see ProjectView.vue's header for the fuller rationale
     (destructive actions should read as a warning color, not look identical to a neutral edit/sync
     action). No behavior change.
+    2026-08-09: added a "Transfer ownership" section to the Danger zone card, above Delete — a
+    username field + Transfer button, gated behind an AlertDialog confirm (POST
+    /api/v1/project/{id}/transfer, backend-enforced can_transfer_ownership, same owner/admin tier as
+    delete). Unlike the per-row AlertDialogs elsewhere in this file, `transferUsername` needs no
+    target/open-state ref split — it's the typed text itself, not an item pulled from a list, so
+    nothing can null it out from under the dialog's own close machinery. Redirects to /projects on
+    success, same as deleteProject, since a non-admin owner loses can_view on the Project the moment
+    ownership moves away.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, select, badge,
-    alert-dialog, dialog, switch, tabs, input, label, button, skeleton)
-  @version: 4.4.0
+    alert-dialog, dialog, switch, tabs, input, label, button, skeleton, separator)
+  @version: 4.5.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-08
+  @date: 2026-08-09
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
-import { PhArrowLeft, PhArrowsClockwise, PhCheck, PhCopy, PhGithubLogo, PhKey, PhPencilSimple, PhPlus, PhTrash, PhUserPlus } from '@phosphor-icons/vue';
+import { PhArrowLeft, PhArrowsClockwise, PhArrowsLeftRight, PhCheck, PhCopy, PhGithubLogo, PhKey, PhPencilSimple, PhPlus, PhTrash, PhUserPlus } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { Card, CardContent } from '@/components/ui/card';
@@ -62,6 +70,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
@@ -433,6 +442,31 @@ async function deleteProject() {
     toast.error(e.message);
   }
 }
+
+// Transfer ownership: the backend independently re-checks can_transfer_ownership (owner/admin) and
+// 404s on an unknown username / 409s on transferring to the current owner — this view only gates
+// the button on a non-empty field. Redirects to the project list on success, same as delete, since
+// a non-admin owner immediately loses can_view on the Project the moment ownership moves away.
+const transferUsername = ref('');
+const transferring = ref(false);
+const confirmTransferProject = ref(false);
+function openTransferDialog() {
+  if (!transferUsername.value.trim()) return;
+  confirmTransferProject.value = true;
+}
+async function transferProject() {
+  transferring.value = true;
+  try {
+    await api.transferProject(props.projectId, { username: transferUsername.value.trim() });
+    confirmTransferProject.value = false;
+    toast.success(`Ownership transferred to '${transferUsername.value.trim()}'.`);
+    emit('navigate', '/projects');
+  } catch (e) {
+    toast.error(e.message);
+  } finally {
+    transferring.value = false;
+  }
+}
 </script>
 
 <template>
@@ -642,6 +676,25 @@ async function deleteProject() {
       <Card class="border-destructive/30">
         <CardContent>
           <h2 class="font-semibold mb-2 text-destructive">Danger zone</h2>
+
+          <div class="mb-6">
+            <h3 class="font-medium text-sm mb-1">Transfer ownership</h3>
+            <p class="text-muted-foreground text-sm mb-3">
+              Hand this project to another existing user. They become the owner with full access
+              (reveal, sharing, access keys, GitHub sync, delete). If they were previously a shared
+              Viewer/Editor, that share is removed since owner status already covers it.
+            </p>
+            <form @submit.prevent="openTransferDialog" class="flex gap-2">
+              <Input class="flex-1 max-w-xs" v-model="transferUsername" placeholder="username" />
+              <Button type="submit" variant="outline" :disabled="!transferUsername.trim() || transferring">
+                <PhArrowsLeftRight :size="16" weight="bold" /> Transfer
+              </Button>
+            </form>
+          </div>
+
+          <Separator class="mb-6" />
+
+          <h3 class="font-medium text-sm mb-1 text-destructive">Delete this project</h3>
           <p class="text-muted-foreground text-sm mb-4">
             Deleting a project permanently removes every environment, key, value, share, and access key.
           </p>
@@ -807,6 +860,22 @@ async function deleteProject() {
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction variant="destructive" @click="deleteProject">Delete project</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog :open="confirmTransferProject" @update:open="(v) => !v && (confirmTransferProject = false)">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Transfer ownership to '{{ transferUsername.trim() }}'?</AlertDialogTitle>
+          <AlertDialogDescription>
+            '{{ transferUsername.trim() }}' becomes the owner of '{{ project?.name }}', with full
+            access to every secret and setting. This takes effect immediately.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" @click="transferProject">Transfer</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

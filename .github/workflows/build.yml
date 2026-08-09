@@ -1,14 +1,19 @@
 #   (c) snakeNet.org, All rights reserved
 #       Nebula Vault: self-hosted secrets manager
 #
-# Build + push only, deliberately — unlike Satellite's own build.yml, this workflow does NOT run the
-# snakenet-org/gravity-push (deploy notification) or snakenet-org/satellite-deploy (auto-deploy)
-# steps, since Nebula Vault isn't registered anywhere yet with real secrets/push-topic-ids for
-# those. Add them here, mirroring apps/satellite/.github/workflows/build.yml, once this app is
-# actually deployed somewhere.
+# Build+push, then auto-deploy via Satellite — mirrors apps/satellite/.github/workflows/build.yml's
+# own two-job shape (see that file's `deploy` job comment for the full reasoning on why this is a
+# separate `needs: build-nebula` job rather than inline steps at the end of the build job: Satellite
+# is the very service that PERFORMS every app's deploy trigger, so redeploying Nebula Vault from
+# inside the still-running build job that produced its new image would mean that job asks the
+# service it depends on to restart itself before the job has actually finished — a fresh `needs:`
+# job only starts once build-nebula has fully completed and exited cleanly). Single image only
+# (unlike Satellite, which also deploys its separate satellite-link reporter) — Nebula Vault has just
+# the one Dockerfile/image. `snakenet-org/gravity-push` (the deploy push-notification step) is left
+# out, same as before this job existed — no push_topic_id has been set up for this app yet.
 
 name: Build Pipeline for Nebula Vault
-run-name: ${{ github.actor }} is building Nebula Vault 🌌
+run-name: ${{ github.actor }} is deploying Nebula Vault 🌌
 on:
   push:
     tags:
@@ -57,3 +62,22 @@ jobs:
               org.opencontainers.image.revision=${{ github.sha }}
               org.opencontainers.image.vendor=snakeNet.org
               org.opencontainers.image.url=https://snakeNet.org/
+
+  # See the header comment above for why this is its own job, gated on build-nebula's success,
+  # rather than inline steps in that job.
+  deploy:
+    needs: build-nebula
+    runs-on: ubuntu-latest
+    environment: Prod
+    steps:
+        - run: echo "Deploying Nebula Vault ${{ github.ref_name }}"
+
+        - name: Execute Satellite Deployment (nebula)
+          id: satellite_deploy
+          uses: snakenet-org/satellite-deploy@v1
+          with:
+            domain: 'ops.snakenet.io'
+            satellite_token: ${{ secrets.SATELLITE_TOKEN }}
+            deployment_token: ${{ secrets.DEPLOYMENT_TOKEN }}
+            image: ghcr.io/${{ github.actor }}/nebula
+            version: ${{ github.ref_name }}

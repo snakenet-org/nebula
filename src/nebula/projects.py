@@ -11,18 +11,24 @@
                     CRUD and editing the project's own name/description.
     - can_reveal  — owner or admin ONLY, regardless of share role. A shared EDITOR can create/change
                     values but never decrypt one back — see nebula.secrets.reveal_value.
-    - can_manage_sharing / can_manage_access_keys / can_delete — owner or admin only.
+    - can_manage_sharing / can_manage_access_keys / can_delete / can_transfer_ownership — owner or
+      admin only.
   These mirror gravity.pulsars' can_edit/can_change_state shape: bare functions taking already-loaded
   objects, no ORM queries of their own, so a router can resolve everything it needs in one pass and
   then just call these as pure checks.
+  transfer_ownership (2026-08-09) reassigns Project.owner_id to another existing user by username —
+  reuses UnknownShareTargetError for "no such user" (same condition share_project already models)
+  rather than a new exception type, and drops any pre-existing ProjectShare row the new owner had
+  (owner status already implies full access; a stale Viewer/Editor row alongside it would be
+  redundant). Gated by can_transfer_ownership (owner/admin), same tier as can_delete.
 @ai-rules:
   - Every list/get that returns Projects to a caller MUST go through list_projects/
     get_visible_project — never a bare `select(Project)` elsewhere in the codebase.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 2.0.0
+@version: 2.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-08-09
 """
 
 import uuid
@@ -43,6 +49,10 @@ class DuplicateProjectShareError(Exception):
 
 class UnknownShareTargetError(Exception):
     """Raised when sharing a Project with a username that doesn't resolve to a user."""
+
+
+class CannotTransferToSelfError(Exception):
+    """Raised when transferring a Project to the user who already owns it."""
 
 
 # ── Permission matrix ────────────────────────────────────────────────────────
@@ -77,6 +87,12 @@ def can_manage_github(actor: UserAccount, project: Project) -> bool:
 
 
 def can_delete(actor: UserAccount, project: Project) -> bool:
+    return actor.is_admin or project.owner_id == actor.id
+
+
+def can_transfer_ownership(actor: UserAccount, project: Project) -> bool:
+    """Same owner/admin-only trust tier as can_delete — transferring is at least as consequential
+    as deleting, since it hands control (including can_reveal on every secret) to someone else."""
     return actor.is_admin or project.owner_id == actor.id
 
 
@@ -164,6 +180,34 @@ async def update_project(
 async def delete_project(session: AsyncSession, project: Project) -> None:
     await session.delete(project)
     await session.commit()
+
+
+async def transfer_ownership(
+    session: AsyncSession, project: Project, *, username: str
+) -> Project:
+    """Reassign a Project's owner_id to another existing user, by username.
+
+    Raises UnknownShareTargetError if the username doesn't resolve (reused rather than a new
+    exception type — same "no such user to hand this to" condition share_project already models)
+    and CannotTransferToSelfError if it resolves to the current owner. If the new owner already had
+    a ProjectShare row on this Project (they were previously a Viewer/Editor), it's dropped — owner
+    status already implies full access, so keeping a stale share row alongside it would be
+    redundant and confusing in the sharing list.
+    """
+    result = await session.execute(select(UserAccount).where(UserAccount.username == username))
+    target = result.scalar_one_or_none()
+    if target is None:
+        raise UnknownShareTargetError(username)
+    if target.id == project.owner_id:
+        raise CannotTransferToSelfError(username)
+
+    project.owner_id = target.id
+    existing_share = await get_share(session, project.id, target.id)
+    if existing_share is not None:
+        await session.delete(existing_share)
+    await session.commit()
+    await session.refresh(project)
+    return project
 
 
 # ── Sharing ───────────────────────────────────────────────────────────────────

@@ -24,9 +24,12 @@
   (nebula.projects.can_view), so this response never leaks the existence/name of a Project or key
   the viewer has no visibility into, even though the reference itself may have been configured by a
   different admin who could see it.
-@version: 4.0.0
+  Since 2026-08-09, ProjectTransferRequest backs the danger-zone "transfer ownership" action
+  (api/v1/project.py's POST /{project_id}/transfer) — just the target username, mirroring
+  ProjectShareCreateRequest's shape.
+@version: 4.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-08
+@date: 2026-08-09
 """
 
 import uuid
@@ -135,6 +138,10 @@ class ProjectGithubSyncResultResponse(BaseModel):
     secrets_synced: int
     variables_synced: int
     failures: list[str]
+
+
+class ProjectTransferRequest(BaseModel):
+    username: str
 
 
 class ProjectShareCreateRequest(BaseModel):

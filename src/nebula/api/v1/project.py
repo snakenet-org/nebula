@@ -33,10 +33,15 @@
     OWN Project first — see _resolve_pat_source. Never trust nebula.github_sync's own defense-in-
     depth existence check as a substitute for that permission check.
   - Maintain 100% type-hinting coverage.
+  2026-08-09: added POST /{project_id}/transfer (transfer_project) — the danger-zone "transfer
+  ownership" action, gated by the new can_transfer_ownership (same owner/admin-only tier as
+  can_delete). Delegates entirely to nebula.projects.transfer_ownership; 404s on an unknown
+  username (reusing UnknownShareTargetError, same as sharing), 409s on transferring to the current
+  owner.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 4.0.0
+@version: 4.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-08
+@date: 2026-08-09
 """
 
 import uuid
@@ -68,6 +73,7 @@ from nebula.models.project import (
     ProjectShareCreateRequest,
     ProjectShareResponse,
     ProjectShareUpdateRequest,
+    ProjectTransferRequest,
     ProjectUpdateRequest,
 )
 from nebula.models.tables import (
@@ -79,6 +85,7 @@ from nebula.models.tables import (
     UserAccount,
 )
 from nebula.projects import (
+    CannotTransferToSelfError,
     DuplicateProjectShareError,
     ProjectNotFoundError,
     UnknownShareTargetError,
@@ -172,6 +179,9 @@ class ProjectRouter(Endpoint):
         self.add_api_route("/{project_id}", self.get_project, methods=["GET"], response_model=ProjectResponse)
         self.add_api_route("/{project_id}", self.update_project, methods=["PATCH"], response_model=ProjectResponse)
         self.add_api_route("/{project_id}", self.delete_project, methods=["DELETE"], status_code=204)
+        self.add_api_route(
+            "/{project_id}/transfer", self.transfer_project, methods=["POST"], response_model=ProjectResponse
+        )
         self.add_api_route(
             "/{project_id}/shares", self.list_shares, methods=["GET"], response_model=list[ProjectShareResponse]
         )
@@ -306,6 +316,33 @@ class ProjectRouter(Endpoint):
             action="project.delete", object_type="project", object_id=project_id_copy,
             object_label=project_name, project_id=None,
         )
+
+    async def transfer_project(
+        self,
+        project_id: uuid.UUID,
+        payload: ProjectTransferRequest,
+        request: Request,
+        actor: UserAccount = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session),
+    ) -> ProjectResponse:
+        project, _share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_transfer_ownership(actor, project):
+            raise HTTPException(status_code=403, detail="You cannot transfer this project")
+        try:
+            project = await projects_service.transfer_ownership(
+                session, project, username=payload.username
+            )
+        except UnknownShareTargetError:
+            raise HTTPException(status_code=404, detail="No such user")
+        except CannotTransferToSelfError:
+            raise HTTPException(status_code=409, detail="This project is already owned by that user")
+        await audit_service.record_user_action(
+            session, actor, request,
+            action="project.transfer_ownership", object_type="project", object_id=project.id,
+            object_label=f"{project.name} → {payload.username}", project_id=project.id,
+        )
+        share = await projects_service.get_share(session, project.id, actor.id)
+        return await _to_response(session, actor, project, share)
 
     async def list_shares(
         self,
