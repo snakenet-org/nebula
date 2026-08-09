@@ -6,11 +6,18 @@
   caller). Permission helpers all take the already-resolved `actor` UserAccount + `project` +
   (where relevant) the caller's own ProjectShare row, resolved once per request by the router layer
   via get_share():
-    - can_view    — owner, admin, or ANY ProjectShare row (either role).
-    - can_edit    — owner, admin, or ProjectShare.role == EDITOR. Governs environments/keys/values
-                    CRUD and editing the project's own name/description.
-    - can_reveal  — owner or admin ONLY, regardless of share role. A shared EDITOR can create/change
-                    values but never decrypt one back — see nebula.secrets.reveal_value.
+    - can_view       — owner, admin, or ANY ProjectShare row (either role).
+    - can_edit       — owner, admin, or ProjectShare.role == EDITOR. Governs key CRUD (name/
+                       description/environment/type/sync_enabled) and creating/deleting keys — but
+                       NOT what a value actually IS, see can_edit_value.
+    - can_reveal     — owner, admin, or ProjectShare.role == EDITOR. Governs decrypting a secret back
+                       to plaintext (nebula.secrets.reveal_value) — a shared EDITOR may read/copy a
+                       value but never change one, see can_edit_value.
+    - can_edit_value — owner or admin ONLY, regardless of share role. Governs setting/changing what a
+                       key's value IS: set_value, an initial value or source_key_id at create time,
+                       and bulk_create_keys (every row of a .env upload sets a value). A shared
+                       EDITOR can rename/delete/reassign-environment/toggle-sync a key and can reveal
+                       its current value, but can never write a new one — see nebula.secrets.set_value.
     - can_manage_sharing / can_manage_access_keys / can_delete / can_transfer_ownership — owner or
       admin only.
   These mirror gravity.pulsars' can_edit/can_change_state shape: bare functions taking already-loaded
@@ -21,12 +28,17 @@
   rather than a new exception type, and drops any pre-existing ProjectShare row the new owner had
   (owner status already implies full access; a stale Viewer/Editor row alongside it would be
   redundant). Gated by can_transfer_ownership (owner/admin), same tier as can_delete.
+  2026-08-09 (later same day): split "can change a value" out of can_edit into its own
+  can_edit_value (owner/admin only) and widened can_reveal to also cover a shared EDITOR — an
+  EDITOR can now read/copy a secret's plaintext but can no longer set/change one; every other
+  editor capability (rename, delete, environment reassignment, sync toggle) is unchanged. can_reveal
+  now takes the caller's `share` row, same signature shape as can_view/can_edit.
 @ai-rules:
   - Every list/get that returns Projects to a caller MUST go through list_projects/
     get_visible_project — never a bare `select(Project)` elsewhere in the codebase.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 2.1.0
+@version: 2.2.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-09
 """
@@ -68,7 +80,15 @@ def can_edit(actor: UserAccount, project: Project, share: ProjectShare | None) -
     )
 
 
-def can_reveal(actor: UserAccount, project: Project) -> bool:
+def can_reveal(actor: UserAccount, project: Project, share: ProjectShare | None) -> bool:
+    return (
+        actor.is_admin
+        or project.owner_id == actor.id
+        or (share is not None and share.role == ShareRole.EDITOR)
+    )
+
+
+def can_edit_value(actor: UserAccount, project: Project) -> bool:
     return actor.is_admin or project.owner_id == actor.id
 
 

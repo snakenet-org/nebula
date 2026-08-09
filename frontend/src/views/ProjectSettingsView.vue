@@ -22,10 +22,11 @@
     ("Custom token" / "Reference a secret", same Tabs pattern as PasswordGeneratorDialog.vue) instead
     of a single Input. "Reference a secret" is a two-step Project→Secret Select pair
     (`patSourceProjects`/`patSourceKeys`, lazily loaded on first use of that tab — most targets never
-    need it) — the Project list is filtered client-side to `my_role` owner/admin only, since
-    referencing a secret you can't reveal yourself would let this Project's sync silently consume a
-    credential you never had visibility into (the backend independently re-enforces this via
-    can_reveal, this filter is purely so the picker never even offers an option the API would 403).
+    need it) — the Project list is filtered client-side to `my_role` owner/admin/editor (since
+    2026-08-09, later same day — matches can_reveal's widened trust tier below), since referencing a
+    secret you can't reveal yourself would let this Project's sync silently consume a credential you
+    never had visibility into (the backend independently re-enforces this via can_reveal, this
+    filter is purely so the picker never even offers an option the API would 403).
     The Secret list is further filtered to `is_set` keys only (an unset key has nothing to
     reference). Editing an existing reference-mode target shows its current `pat_source_label`
     read-only and leaves both Selects unset — same "blank/omitted = unchanged" convention the custom
@@ -56,7 +57,7 @@
     ownership moves away.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, select, badge,
     alert-dialog, dialog, switch, tabs, input, label, button, skeleton, separator)
-  @version: 4.5.0
+  @version: 4.6.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-09
 -->
@@ -272,10 +273,10 @@ async function ensurePatSourceProjectsLoaded() {
   loadingPatSourceProjects.value = true;
   try {
     const all = await api.listProjects();
-    // Only projects the caller can REVEAL (owner/admin) — the backend independently re-enforces
-    // this via can_reveal, this filter just keeps the picker from ever offering an option the API
-    // would reject.
-    patSourceProjects.value = all.filter((p) => ['owner', 'admin'].includes(p.my_role));
+    // Only projects the caller can REVEAL (owner/admin/shared editor) — the backend independently
+    // re-enforces this via can_reveal, this filter just keeps the picker from ever offering an
+    // option the API would reject.
+    patSourceProjects.value = all.filter((p) => ['owner', 'admin', 'editor'].includes(p.my_role));
   } catch (e) {
     toast.error(e.message);
   } finally {

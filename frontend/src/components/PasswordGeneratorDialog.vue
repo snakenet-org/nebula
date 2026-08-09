@@ -11,10 +11,19 @@
     same convention as every other mutation toast in the app) so the click is unmistakable even though
     the icon-swap alone sits inside a small icon button. Nothing here ever leaves the browser — no API
     call, no persistence.
+    2026-08-09: fixed the confirmation signal actually never firing — `copy(uuid, copiedUuid)`/
+    `copy(password, copiedPassword)` were called straight from the template, but Vue auto-unwraps a
+    top-level ref referenced there, so `flag` inside `copy()` received the current unwrapped boolean
+    instead of the ref itself; `flag.value = true` then threw ("Cannot create property 'value' on
+    boolean") before the icon swap, the toast, or the revert timer ever ran — confirmed via a
+    Playwright click, not by reading the code (the bug is invisible from the source alone). Fixed by
+    adding `copyUuid`/`copyPassword` wrapper functions that call the shared `copy()` helper from
+    script instead, where `copiedUuid`/`copiedPassword` are real refs — the same shape
+    ProjectSettingsView's own `copyToken` already uses, confirmed by reading it.
   @dependencies: vue, @phosphor-icons/vue, vue-sonner, shadcn-vue (dialog, tabs, slider, button)
-  @version: 1.1.0
+  @version: 1.2.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-08
+  @date: 2026-08-09
 -->
 <script setup>
 import { ref, watch } from 'vue';
@@ -59,11 +68,22 @@ watch(
 
 const copiedUuid = ref(false);
 const copiedPassword = ref(false);
+// `flag` must be the ref itself, mutated here via `.value` — never call `copy(value, copiedUuid)`
+// directly from the template: Vue auto-unwraps a top-level ref referenced there, so the template
+// would pass the current unwrapped boolean instead of the ref, and `flag.value = true` throws
+// ("Cannot create property 'value' on boolean"). copyUuid/copyPassword below close over the real
+// refs from script instead, where no such unwrapping happens.
 function copy(value, flag) {
   navigator.clipboard?.writeText(value);
   flag.value = true;
   toast.success('Copied to clipboard.');
   setTimeout(() => (flag.value = false), 1500);
+}
+function copyUuid() {
+  copy(uuid.value, copiedUuid);
+}
+function copyPassword() {
+  copy(password.value, copiedPassword);
 }
 </script>
 
@@ -87,7 +107,7 @@ function copy(value, flag) {
             <Button variant="outline" size="icon" title="Generate new" @click="newUuid">
               <PhArrowsClockwise :size="16" weight="bold" />
             </Button>
-            <Button variant="outline" size="icon" title="Copy" @click="copy(uuid, copiedUuid)">
+            <Button variant="outline" size="icon" title="Copy" @click="copyUuid">
               <PhCheck v-if="copiedUuid" :size="16" weight="bold" />
               <PhCopy v-else :size="16" weight="bold" />
             </Button>
@@ -100,7 +120,7 @@ function copy(value, flag) {
             <Button variant="outline" size="icon" title="Generate new" @click="newPassword">
               <PhArrowsClockwise :size="16" weight="bold" />
             </Button>
-            <Button variant="outline" size="icon" title="Copy" @click="copy(password, copiedPassword)">
+            <Button variant="outline" size="icon" title="Copy" @click="copyPassword">
               <PhCheck v-if="copiedPassword" :size="16" weight="bold" />
               <PhCopy v-else :size="16" weight="bold" />
             </Button>

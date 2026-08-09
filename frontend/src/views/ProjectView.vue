@@ -4,9 +4,15 @@
     Environment (picked from the global list at creation, reassignable via the row's Environment
     Select) instead of the old grid-of-values-per-environment shape — so this is now a flat table
     (Key | Environment | Value | actions) with an Environment filter above it, not a grid.
-    can_edit/can_reveal are derived from project.my_role (owner/admin/editor/viewer — see
-    nebula.projects' permission matrix, mirrored client-side only for showing/hiding controls; the
-    backend re-checks everything independently). Values are masked (`•••••••`) by default —
+    can_edit/can_reveal/can_edit_value are derived from project.my_role (owner/admin/editor/viewer —
+    see nebula.projects' permission matrix, mirrored client-side only for showing/hiding controls;
+    the backend re-checks everything independently). Since 2026-08-09 (later same day), a shared
+    EDITOR can reveal+copy a value (canReveal) but can no longer set/change one (canEditValue,
+    owner/admin only) — canEdit itself is unchanged and still governs rename/delete/environment-
+    reassignment/sync-toggle/creating a bare key. The "New key" form's value Tabs (direct-value /
+    reference) only render for canEditValue; an EDITOR instead sees just the Type Select, creating a
+    valueless key an owner/admin fills in later. The per-row "Set value" popover trigger is gated on
+    canEditValue, not canEdit. Values are masked (`•••••••`) by default —
     revealValue() is called on demand per key and the plaintext is kept only in this component's own
     `revealed` map (never persisted, cleared on navigation since the component unmounts). Editing a
     value is an inline per-row shadcn-vue Popover. Deleting a key goes through a shadcn-vue
@@ -89,16 +95,18 @@
     `description` (a new Textarea) in the same submit, not just `name` — was previously name-only,
     even though SecretKey.description could already be set at creation.
     2026-08-09 (later same day): each key row's name now leads with a small status icon —
-    `PhInfo` (text-info) when `key.extraction_count > 0`, native `title` reading "Extracted N times"
-    (matches this file's existing hover-hint convention — `title="Edit key"` etc. — rather than the
-    richer shadcn Tooltip, which would need its own local TooltipProvider since this view sits
-    outside App.vue's sidebar-only one); `PhWarning` (text-warning) otherwise, title "This key has
-    never been extracted". `extraction_count` is new on SecretKeyResponse (api/v1/secret.py +
-    nebula.audit.EXTRACTION_ACTIONS — a human's "secret.reveal" or an access key's "vault.retrieve",
-    success only) — no frontend computation involved, the count ships straight from listSecrets.
+    `PhInfo` (text-info) when `key.extraction_count > 0`, `PhWarning` (text-warning) otherwise.
+    `extraction_count` is new on SecretKeyResponse (api/v1/secret.py + nebula.audit.
+    EXTRACTION_ACTIONS — a human's "secret.reveal" or an access key's "vault.retrieve", success
+    only) — no frontend computation involved, the count ships straight from listSecrets.
+    2026-08-09 (still later): both status icons now use a real shadcn Tooltip ("Extracted N times" /
+    "This key has never been extracted") instead of the native `title` attribute used at first —
+    wrapped in a local `TooltipProvider` around just this table, since this view sits outside
+    App.vue's sidebar-only one.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
-    textarea, label, select, switch, tabs, table, popover, checkbox, alert-dialog, dialog, skeleton)
-  @version: 7.1.0
+    textarea, label, select, switch, tabs, table, tooltip, popover, checkbox, alert-dialog, dialog,
+    skeleton)
+  @version: 7.3.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-09
 -->
@@ -123,6 +131,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 
 const props = defineProps({ projectId: { type: String, required: true } });
 const emit = defineEmits(['navigate']);
@@ -133,7 +142,11 @@ const keys = ref([]);
 const loading = ref(true);
 
 const canEdit = computed(() => ['owner', 'admin', 'editor'].includes(project.value?.my_role));
-const canReveal = computed(() => ['owner', 'admin'].includes(project.value?.my_role));
+const canReveal = computed(() => ['owner', 'admin', 'editor'].includes(project.value?.my_role));
+// Distinct from canEdit/canReveal: a shared EDITOR can rename/delete/reassign-environment/toggle-
+// sync a key and can now reveal+copy its current value, but can never set/change what a value IS —
+// see nebula.projects' can_edit_value (owner/admin only).
+const canEditValue = computed(() => ['owner', 'admin'].includes(project.value?.my_role));
 
 async function loadAll() {
   loading.value = true;
@@ -195,7 +208,7 @@ async function ensureReferenceSourceProjectsLoaded() {
   try {
     const all = await api.listProjects();
     referenceSourceProjects.value = all.filter(
-      (p) => p.id !== props.projectId && ['owner', 'admin'].includes(p.my_role)
+      (p) => p.id !== props.projectId && ['owner', 'admin', 'editor'].includes(p.my_role)
     );
   } catch (e) {
     toast.error(e.message);
@@ -564,7 +577,7 @@ async function saveValue() {
             class="hidden"
             @change="onEnvFileSelected"
           />
-          <Button v-if="canEdit && environments.length" variant="outline" @click="openEnvFilePicker">
+          <Button v-if="canEditValue && environments.length" variant="outline" @click="openEnvFilePicker">
             <PhUpload :size="16" weight="bold" /> Upload .env
           </Button>
           <Button v-if="canEdit && environments.length" @click="showKeyForm = !showKeyForm">
@@ -596,7 +609,23 @@ async function saveValue() {
               </div>
             </div>
 
-            <Tabs v-model="newKeyValueMode">
+            <div v-if="!canEditValue" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div class="space-y-1.5">
+                <Label for="new-key-type">Type</Label>
+                <Select v-model="newKey.variable_type">
+                  <SelectTrigger id="new-key-type" class="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="secret">Secret</SelectItem>
+                    <SelectItem value="environment">Environment variable</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <p class="sm:col-span-2 text-muted-foreground text-xs self-end">
+                You can create the key now; an owner or admin will need to set its value.
+              </p>
+            </div>
+
+            <Tabs v-else v-model="newKeyValueMode">
               <TabsList class="w-full max-w-md">
                 <TabsTrigger value="direct" class="flex-1">Set value</TabsTrigger>
                 <TabsTrigger value="reference" class="flex-1">Reference a secret</TabsTrigger>
@@ -630,7 +659,7 @@ async function saveValue() {
                       </SelectContent>
                     </Select>
                     <p v-if="!loadingReferenceSourceProjects && !referenceSourceProjects.length" class="text-muted-foreground text-xs">
-                      You need to own or administer another project to reference one of its secrets.
+                      You need reveal access on another project to reference one of its secrets.
                     </p>
                   </div>
                   <div class="space-y-1.5">
@@ -672,6 +701,7 @@ async function saveValue() {
       </Card>
 
       <Card v-else class="py-0">
+        <TooltipProvider :delay-duration="200">
         <Table>
           <TableHeader>
             <TableRow>
@@ -686,20 +716,20 @@ async function saveValue() {
             <TableRow v-for="key in filteredKeys" :key="key.id">
               <TableCell class="align-top">
                 <div class="flex items-center gap-1.5">
-                  <PhInfo
-                    v-if="key.extraction_count > 0"
-                    :size="13"
-                    weight="bold"
-                    class="text-info shrink-0"
-                    :title="`Extracted ${key.extraction_count} time${key.extraction_count === 1 ? '' : 's'}`"
-                  />
-                  <PhWarning
-                    v-else
-                    :size="13"
-                    weight="bold"
-                    class="text-warning shrink-0"
-                    title="This key has never been extracted"
-                  />
+                  <Tooltip v-if="key.extraction_count > 0">
+                    <TooltipTrigger as="span" class="inline-flex shrink-0">
+                      <PhInfo :size="13" weight="bold" class="text-info" />
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      Extracted {{ key.extraction_count }} time{{ key.extraction_count === 1 ? '' : 's' }}
+                    </TooltipContent>
+                  </Tooltip>
+                  <Tooltip v-else>
+                    <TooltipTrigger as="span" class="inline-flex shrink-0">
+                      <PhWarning :size="13" weight="bold" class="text-warning" />
+                    </TooltipTrigger>
+                    <TooltipContent>This key has never been extracted</TooltipContent>
+                  </Tooltip>
                   <span class="font-mono font-semibold">{{ key.name }}</span>
                   <Badge :variant="key.variable_type === 'secret' ? 'warning' : 'info'" class="text-[0.65rem] px-1.5 py-0">
                     {{ key.variable_type === 'secret' ? 'secret' : 'env var' }}
@@ -769,7 +799,7 @@ async function saveValue() {
                   </Button>
 
                   <Popover
-                    v-if="canEdit && !key.source_key_id"
+                    v-if="canEditValue && !key.source_key_id"
                     :open="editingKeyId === key.id"
                     @update:open="(v) => !v && closeEditor()"
                   >
@@ -811,6 +841,7 @@ async function saveValue() {
             </TableRow>
           </TableBody>
         </Table>
+        </TooltipProvider>
       </Card>
     </template>
 

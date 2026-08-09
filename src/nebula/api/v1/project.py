@@ -17,11 +17,13 @@
   Since 2026-08-08, create_github_target/update_github_target accept a `pat_source_key_id`
   (reference-mode PAT) alongside the existing free-text `pat`. `_resolve_pat_source` is the one
   place that permission-checks it: the referenced SecretKey must exist, must have a value set, and
-  the ACTOR must have can_reveal (owner/admin) on the key's OWN Project — matching, not loosening,
-  the trust tier can_manage_github already requires on the target Project, since a reference lets
-  this Project's sync silently consume that other Project's secret as a live credential. This is
-  deliberately stricter than can_view: an Editor/Viewer of a foreign Project could otherwise wire up
-  a sync target that uses a secret they can't even reveal themselves as this Project's GitHub PAT.
+  the ACTOR must have can_reveal on the key's OWN Project — matching, not loosening, the trust tier
+  can_manage_github already requires on the target Project, since a reference lets this Project's
+  sync silently consume that other Project's secret as a live credential. This is deliberately
+  stricter than can_view: a plain Viewer of a foreign Project could otherwise wire up a sync target
+  that uses a secret they can't even reveal themselves as this Project's GitHub PAT. Since 2026-08-09
+  (later same day) can_reveal also covers a shared EDITOR of that foreign Project, matching that
+  EDITOR's own new ability to reveal the value directly — see nebula.projects' module docstring.
   _to_target_response resolves `pat_source_label` for display via nebula.projects.can_view (not
   can_reveal) on the source Project instead — a looser bar because it's read-only display, but still
   gated so a target's edit dialog never names a Project/key the CURRENT viewer has no visibility
@@ -38,8 +40,11 @@
   can_delete). Delegates entirely to nebula.projects.transfer_ownership; 404s on an unknown
   username (reusing UnknownShareTargetError, same as sharing), 409s on transferring to the current
   owner.
+  2026-08-09 (later same day): `_to_response`'s my_role computation is unchanged (still "editor" for
+  any ProjectShare.role == EDITOR) — only what "editor" now MEANS shifted, see nebula.projects'
+  module docstring and models/project.py's MyRole doc comment.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 4.1.0
+@version: 4.2.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-09
 """
@@ -467,7 +472,7 @@ class ProjectRouter(Endpoint):
     ) -> SecretKey:
         """Permission-checks a `pat_source_key_id` before it's ever handed to
         nebula.github_sync — the referenced key must exist, must have a value set, and the ACTOR
-        must have can_reveal (owner/admin, not just can_view) on the key's OWN Project. See the
+        must have can_reveal (not just can_view) on the key's OWN Project. See the
         module docstring for why this is a stricter bar than can_view."""
         key = await secrets_service.get_key_by_id(session, key_id)
         if key is None:
@@ -475,15 +480,15 @@ class ProjectRouter(Endpoint):
         if key.ciphertext is None:
             raise HTTPException(status_code=422, detail="Referenced secret has no value set")
         try:
-            source_project, _share = await projects_service.get_visible_project(
+            source_project, source_share = await projects_service.get_visible_project(
                 session, actor, key.project_id
             )
         except ProjectNotFoundError:
             raise HTTPException(status_code=422, detail="Referenced secret not found")
-        if not projects_service.can_reveal(actor, source_project):
+        if not projects_service.can_reveal(actor, source_project, source_share):
             raise HTTPException(
                 status_code=403,
-                detail="You must be an owner or admin of the referenced secret's project",
+                detail="You must be able to reveal values in the referenced secret's project",
             )
         return key
 

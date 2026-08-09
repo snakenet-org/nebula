@@ -3,12 +3,16 @@
 @ai-purpose: SecretKey CRUD + value set/reveal — thin wrapper over nebula.secrets.
 @ai-context: Since the 2026-08-06 global-environments redesign, a key carries exactly one
   Environment link; list_keys/get_key responses carry PRESENCE ONLY (is_set), never ciphertext.
-  Setting a value or reassigning environment_id requires can_edit; revealing one requires can_reveal
-  (owner/admin only — see nebula.projects' module docstring for why a shared EDITOR can change a
-  value but never decrypt one back). bulk_create_keys backs the Project view's "Upload .env" button —
-  same can_edit gate, always creates brand-new keys (409s naming every conflict rather than updating
-  an existing key); one Environment applies to the whole batch, but `variable_type` is per-item
-  (SecretBulkItem) so the review dialog can pick secret vs. environment variable per row.
+  Since 2026-08-09 (later same day), setting/changing what a value IS (set_value, an initial value
+  or source_key_id at create_key time, every row of bulk_create_keys) requires can_edit_value
+  (owner/admin only); reassigning environment_id/name/description/sync_enabled/deleting a key still
+  only needs can_edit (owner/admin/shared EDITOR); revealing a value requires can_reveal (owner/
+  admin/shared EDITOR — see nebula.projects' module docstring for the full split: a shared EDITOR
+  can now read/copy a value but never write a new one). bulk_create_keys backs the Project view's
+  "Upload .env" button — gated by can_edit_value (every row sets a value), always creates brand-new
+  keys (409s naming every conflict rather than updating an existing key); one Environment applies to
+  the whole batch, but `variable_type` is per-item (SecretBulkItem) so the review dialog can pick
+  secret vs. environment variable per row.
   Since the same-day multi-repo GitHub sync redesign, every route that changes what a value actually
   IS (update_key, delete_key, set_value, bulk_create_keys, and create_key when a `value` was actually
   provided — see below) calls `_auto_sync_github` right after its own commit — this fans out to every
@@ -34,9 +38,12 @@
   place that permission-checks it, mirroring api/v1/project.py's `_resolve_pat_source` almost
   exactly: the referenced key must exist, must belong to a DIFFERENT Project (the product ask is
   explicitly cross-project), must not itself be a reference (no chaining), and the ACTOR must have
-  can_reveal (owner/admin, not just can_view) on the key's OWN Project — a Viewer/Editor of a foreign
-  Project could otherwise wire up a reference that consumes a secret they can't even reveal
-  themselves. delete_key can now ALSO 409 (SecretKeyInUseAsReferenceSourceError) when the key being
+  can_reveal (not just can_view) on the key's OWN Project — a plain Viewer of a foreign Project could
+  otherwise wire up a reference that consumes a secret they can't even reveal themselves; a shared
+  EDITOR of that foreign Project passes this bar too, same as they can now reveal it directly.
+  create_key ALSO requires can_edit_value on THIS Project whenever payload.value or source_key_id is
+  present — a shared EDITOR here can still create a bare key, just not one that already has (or
+  points at) a value. delete_key can now ALSO 409 (SecretKeyInUseAsReferenceSourceError) when the key being
   deleted is still referenced by another SecretKey's source_key_id. update_key refuses
   (SecretKeyIsReferenceError → 409) to change a reference key's `variable_type`; set_value refuses
   the same way for its value — both are only ever changed by editing the SOURCE key, in ITS OWN
@@ -64,7 +71,7 @@
     existence/no-chaining checks as a substitute for that permission check.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 5.1.0
+@version: 5.2.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-09
 """
@@ -238,8 +245,8 @@ class SecretRouter(Endpoint):
         """Permission-checks a `source_key_id` before it's ever handed to nebula.secrets — the
         referenced key must exist, must belong to a DIFFERENT Project (referencing is explicitly
         cross-project — see the module docstring), must not itself already be a reference (no
-        chaining), and the ACTOR must have can_reveal (owner/admin, not just can_view) on the key's
-        OWN Project. Mirrors api/v1/project.py's `_resolve_pat_source` almost exactly."""
+        chaining), and the ACTOR must have can_reveal (not just can_view) on the key's OWN Project.
+        Mirrors api/v1/project.py's `_resolve_pat_source` almost exactly."""
         key = await secrets_service.get_key_by_id(session, key_id)
         if key is None:
             raise HTTPException(status_code=422, detail="Referenced secret not found")
@@ -252,15 +259,15 @@ class SecretRouter(Endpoint):
                 status_code=422, detail="Cannot reference a key that is itself a reference"
             )
         try:
-            source_project, _share = await projects_service.get_visible_project(
+            source_project, source_share = await projects_service.get_visible_project(
                 session, actor, key.project_id
             )
         except ProjectNotFoundError:
             raise HTTPException(status_code=422, detail="Referenced secret not found")
-        if not projects_service.can_reveal(actor, source_project):
+        if not projects_service.can_reveal(actor, source_project, source_share):
             raise HTTPException(
                 status_code=403,
-                detail="You must be an owner or admin of the referenced secret's project",
+                detail="You must be able to reveal values in the referenced secret's project",
             )
         return key
 
@@ -289,6 +296,10 @@ class SecretRouter(Endpoint):
         project, share = await self._project_or_404(session, actor, project_id)
         if not projects_service.can_edit(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot edit this project")
+        if (payload.value or payload.source_key_id is not None) and not projects_service.can_edit_value(
+            actor, project
+        ):
+            raise HTTPException(status_code=403, detail="You cannot set a value in this project")
         await self._environment_or_404(session, payload.environment_id)
         source_key_id = None
         if payload.source_key_id is not None:
@@ -336,9 +347,9 @@ class SecretRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> list[SecretKeyResponse]:
-        project, share = await self._project_or_404(session, actor, project_id)
-        if not projects_service.can_edit(actor, project, share):
-            raise HTTPException(status_code=403, detail="You cannot edit this project")
+        project, _share = await self._project_or_404(session, actor, project_id)
+        if not projects_service.can_edit_value(actor, project):
+            raise HTTPException(status_code=403, detail="You cannot set values in this project")
         await self._environment_or_404(session, payload.environment_id)
         if not payload.items:
             raise HTTPException(status_code=400, detail="No variables to add")
@@ -451,9 +462,9 @@ class SecretRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> SecretKeyResponse:
-        project, share = await self._project_or_404(session, actor, project_id)
-        if not projects_service.can_edit(actor, project, share):
-            raise HTTPException(status_code=403, detail="You cannot edit this project")
+        project, _share = await self._project_or_404(session, actor, project_id)
+        if not projects_service.can_edit_value(actor, project):
+            raise HTTPException(status_code=403, detail="You cannot set values in this project")
         key = await self._key_or_404(session, project_id, key_id)
         try:
             key = await secrets_service.set_value(
@@ -480,16 +491,18 @@ class SecretRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> SecretRevealResponse:
-        project, _share = await self._project_or_404(session, actor, project_id)
+        project, share = await self._project_or_404(session, actor, project_id)
         key = await self._key_or_404(session, project_id, key_id)
         # Resolved — a reference to an ENVIRONMENT-type source is exactly as visible as a normal
         # environment variable, regardless of this row's own (irrelevant) variable_type column.
         variable_type, _ciphertext = await secrets_service.resolve_effective(session, key)
         # An "environment" variable is already visible to anyone who can view the Project (its
-        # value ships straight in the list response) — only a "secret" needs the stricter
-        # owner/admin-only can_reveal gate.
-        if variable_type == VariableType.SECRET and not projects_service.can_reveal(actor, project):
-            raise HTTPException(status_code=403, detail="Only the project owner or an admin may reveal values")
+        # value ships straight in the list response) — only a "secret" needs the stricter can_reveal
+        # gate (owner/admin/shared EDITOR).
+        if variable_type == VariableType.SECRET and not projects_service.can_reveal(actor, project, share):
+            raise HTTPException(
+                status_code=403, detail="You do not have permission to reveal values in this project"
+            )
         environment = await environments_service.get_environment(session, key.environment_id)
         try:
             value = await secrets_service.reveal_value(session, key)
