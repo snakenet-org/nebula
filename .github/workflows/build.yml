@@ -24,6 +24,7 @@ jobs:
   build-nebula:
     runs-on: ubuntu-latest
     environment: Prod
+    runs-on: cuda-github-runner
     env:
       PUBLISHER: snakeNet
       MODULE: nebula
