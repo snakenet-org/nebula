@@ -1,29 +1,35 @@
 <!--
-  @ai-purpose: Admin-only Audit Logs page — every mutating action taken through Nebula.
+  @ai-purpose: Audit Logs page — every mutating action taken through Nebula.
   @ai-context: Three tabs, mirroring nebula.audit's three query helpers: "Activity" (logged-in
     humans — project/environment/secret CRUD, sharing, access keys, login/logout, reveal),
     "API calls" (Project access keys hitting ANY api/v1/vault.py route — /secret, /project,
     /status, see nebula.audit.VAULT_ACTIONS — every attempt, success or not), "Failed retrievals"
     (the success=False subset of API calls, across all three vault routes — the same rows the
     Dashboard's "Failed attempts / day" chart counts, shown here as a readable list instead of a
-    chart). The page itself is reachable from the sidebar only for an admin (App.vue) and every
-    /api/v1/audit/* route 403s a non-admin server-side too — this view does no client-side gating
-    beyond simply not rendering for a non-admin caller (the parent already hides the nav entry).
+    chart). 2026-08-12 (GitHub #4): reachable from the sidebar for ANY authenticated user, not just
+    an admin — api/v1/audit.py itself decides how much each caller sees: an admin gets every row
+    app-wide, a non-admin only the rows belonging to a Project they own or are an EDITOR share on
+    (nebula.projects.list_editable_project_ids) — this view does no client-side filtering of its
+    own, it just renders whatever the (already correctly scoped) API response contains.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, badge, tabs, skeleton)
-  @version: 1.0.1
+  @version: 2.0.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-07
+  @date: 2026-08-12
 -->
 <script setup>
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { PhScroll } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
+import { useAuth } from '../composables/useAuth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
+
+const { state: auth } = useAuth();
+const isAdmin = computed(() => !!auth.session?.user?.isAdmin);
 
 const activity = ref([]);
 const apiCalls = ref([]);
@@ -55,7 +61,9 @@ function formatTime(iso) {
   <div class="max-w-6xl mx-auto px-4 py-8 w-full">
     <div class="mb-6">
       <h1 class="text-2xl font-bold flex items-center gap-2"><PhScroll :size="22" weight="bold" /> Audit logs</h1>
-      <p class="text-muted-foreground text-sm mt-1">Every action taken through Nebula Vault. Admin only.</p>
+      <p class="text-muted-foreground text-sm mt-1">
+        {{ isAdmin ? 'Every action taken through Nebula Vault.' : 'Actions on projects you own or edit.' }}
+      </p>
     </div>
 
     <div v-if="loading" class="space-y-3">

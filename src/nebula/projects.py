@@ -33,14 +33,17 @@
   EDITOR can now read/copy a secret's plaintext but can no longer set/change one; every other
   editor capability (rename, delete, environment reassignment, sync toggle) is unchanged. can_reveal
   now takes the caller's `share` row, same signature shape as can_view/can_edit.
+  2026-08-12: added list_editable_project_ids (GitHub #4) — owner-or-EDITOR-share project ids only
+  (narrower than list_projects, which also includes VIEWER shares) — backing the Audit Logs page and
+  Dashboard's non-admin scoping in nebula.audit/nebula.dashboard.
 @ai-rules:
   - Every list/get that returns Projects to a caller MUST go through list_projects/
     get_visible_project — never a bare `select(Project)` elsewhere in the codebase.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 2.2.0
+@version: 2.3.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-09
+@date: 2026-08-12
 """
 
 import uuid
@@ -155,6 +158,29 @@ async def list_projects(session: AsyncSession, actor: UserAccount) -> list[Proje
         .order_by(Project.name)
     )
     return list(result.scalars().unique().all())
+
+
+async def list_editable_project_ids(session: AsyncSession, actor: UserAccount) -> list[uuid.UUID]:
+    """Every Project id the caller owns OR has an EDITOR share role on — narrower than
+    list_projects, which also includes VIEWER-only shares. Backs the Audit Logs page and Dashboard's
+    non-admin scoping (nebula.audit/nebula.dashboard): "sees only audit logs/data of projects that
+    they are owner or editor of" per product spec — a plain Viewer share is deliberately excluded.
+    Admins never call this; they see every project unscoped instead.
+    """
+    result = await session.execute(
+        select(Project.id)
+        .outerjoin(
+            ProjectShare,
+            (ProjectShare.project_id == Project.id) & (ProjectShare.user_id == actor.id),
+        )
+        .where(
+            or_(
+                Project.owner_id == actor.id,
+                (ProjectShare.user_id == actor.id) & (ProjectShare.role == ShareRole.EDITOR),
+            )
+        )
+    )
+    return list(result.scalars().all())
 
 
 async def secret_key_count_for_project(session: AsyncSession, project_id: uuid.UUID) -> int:

@@ -8,9 +8,9 @@
 //   prevents concurrent refresh races when multiple in-flight requests all 401 at the same time.
 //   Mirrors Satellite's services/api.js request/parseResponse shape, with thin per-route helpers
 //   for projects/environments/secrets/access keys.
-// @version: 2.4.0
+// @version: 2.4.1
 // @author: Marc Fiedler <marc@snakenet.org>
-// @date: 2026-08-09
+// @date: 2026-08-12
 import { useAuth } from '../composables/useAuth';
 
 let _refreshPromise = null;
@@ -144,7 +144,7 @@ export const logout = () => request('POST', '/api/v1/auth/logout');
 export const getDashboardSummary = () => request('GET', '/api/v1/dashboard/summary');
 export const getDashboardSeries = () => request('GET', '/api/v1/dashboard/series');
 
-// ── Audit logs (admin only) ─────────────────────────────────────────────────
+// ── Audit logs (server-side scoped: admin sees everything, others their own/editor Projects) ──
 export const listAuditActivity = () => request('GET', '/api/v1/audit/activity');
 export const listAuditApiCalls = () => request('GET', '/api/v1/audit/api-calls');
 export const listAuditFailedRetrievals = () => request('GET', '/api/v1/audit/failed-retrievals');

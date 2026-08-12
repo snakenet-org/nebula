@@ -27,11 +27,15 @@
     running version + "Powered by snakeNet.org" bottom-right (`useConfig().state.version`, forwarded
     from `GET /api/v1/config`'s new `version` field). Removing the header instead of just relocating
     the button reclaims a full row of vertical space for the page content above it.
+    2026-08-12: the "Audit logs" nav entry is no longer admin-only (GitHub #4) — every authenticated
+    user can now reach it; the page itself (AuditLogsView.vue) and its backing routes scope what a
+    non-admin actually sees to their own owned/editor Projects. Dropped the now-unused `isAdmin`
+    computed this required nowhere else in this file.
   @dependencies: vue, @phosphor-icons/vue, vue-sonner, shadcn-vue (button, tooltip, separator,
     avatar, sonner)
-  @version: 5.1.0
+  @version: 5.2.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-09
+  @date: 2026-08-12
 -->
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
@@ -84,7 +88,6 @@ async function navigate(to) {
 }
 
 const isAuthed = computed(() => !!auth.session);
-const isAdmin = computed(() => !!auth.session?.user?.isAdmin);
 
 watch(isAuthed, (authed, wasAuthed) => {
   if (!authed || wasAuthed) return;
@@ -105,7 +108,7 @@ const currentView = computed(() => {
   if (projectId.value) return isSettings.value ? ProjectSettingsView : ProjectView;
   if (path.value.startsWith('/projects')) return HomeView;
   if (path.value.startsWith('/environments')) return EnvironmentsView;
-  if (path.value.startsWith('/audit-logs') && isAdmin.value) return AuditLogsView;
+  if (path.value.startsWith('/audit-logs')) return AuditLogsView;
   if (path.value.startsWith('/about')) return AboutView;
   return DashboardView;
 });
@@ -272,31 +275,29 @@ onUnmounted(() => document.removeEventListener('visibilitychange', _handleVisibi
             <PhStack :size="18" weight="bold" /> Environments
           </Button>
 
-          <template v-if="isAdmin">
-            <Tooltip v-if="!sidebarExpanded">
-              <TooltipTrigger as-child>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="w-full"
-                  :class="path.startsWith('/audit-logs') ? 'bg-accent text-accent-foreground' : ''"
-                  @click="navigate('/audit-logs')"
-                >
-                  <PhScroll :size="18" weight="bold" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent side="left">Audit logs</TooltipContent>
-            </Tooltip>
-            <Button
-              v-else
-              variant="ghost"
-              class="w-full justify-start gap-2.5"
-              :class="path.startsWith('/audit-logs') ? 'bg-accent text-accent-foreground' : ''"
-              @click="navigate('/audit-logs')"
-            >
-              <PhScroll :size="18" weight="bold" /> Audit logs
-            </Button>
-          </template>
+          <Tooltip v-if="!sidebarExpanded">
+            <TooltipTrigger as-child>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="w-full"
+                :class="path.startsWith('/audit-logs') ? 'bg-accent text-accent-foreground' : ''"
+                @click="navigate('/audit-logs')"
+              >
+                <PhScroll :size="18" weight="bold" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">Audit logs</TooltipContent>
+          </Tooltip>
+          <Button
+            v-else
+            variant="ghost"
+            class="w-full justify-start gap-2.5"
+            :class="path.startsWith('/audit-logs') ? 'bg-accent text-accent-foreground' : ''"
+            @click="navigate('/audit-logs')"
+          >
+            <PhScroll :size="18" weight="bold" /> Audit logs
+          </Button>
         </nav>
 
         <Separator />

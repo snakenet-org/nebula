@@ -1,19 +1,25 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: Read-only audit log endpoints — admin only.
-@ai-context: Backs the frontend's admin-only Audit Logs page (three tabs: Activity, API calls,
-  Failed retrievals — see nebula.audit for what partitions each). Every route requires
-  actor.is_admin; a non-admin (even a Project owner) gets 403 — the audit trail is intentionally not
-  scoped per-project or per-user, so nothing short of full admin should see it.
-@version: 1.0.0
+@ai-purpose: Read-only audit log endpoints.
+@ai-context: Backs the frontend's Audit Logs page (three tabs: Activity, API calls, Failed
+  retrievals — see nebula.audit for what partitions each). GitHub #4: any authenticated user may now
+  reach this page (previously admin-only) — an admin still sees every row app-wide
+  (project_ids=None), while a non-admin is scoped to `nebula.projects.list_editable_project_ids`
+  (Projects they own or are an EDITOR share on — a plain Viewer share does not grant audit-log
+  visibility). Scoping is enforced HERE at the router layer, resolved once per route from the actor,
+  and passed down to nebula.audit's query helpers — never trusted to the caller.
+@version: 2.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-08-12
 """
 
-from fastapi import Depends, HTTPException
+import uuid
+
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nebula import audit as audit_service
+from nebula import projects as projects_service
 from nebula.api.endpoint import Endpoint, get_current_user
 from nebula.database import get_session
 from nebula.models.audit import AuditLogEntryResponse
@@ -37,17 +43,19 @@ class AuditRouter(Endpoint):
         )
 
     @staticmethod
-    def _require_admin(actor: UserAccount) -> None:
-        if not actor.is_admin:
-            raise HTTPException(status_code=403, detail="Admin access required")
+    async def _scope(session: AsyncSession, actor: UserAccount) -> list[uuid.UUID] | None:
+        """None (unscoped) for an admin; the caller's owned+editor Project ids otherwise."""
+        if actor.is_admin:
+            return None
+        return await projects_service.list_editable_project_ids(session, actor)
 
     async def activity(
         self,
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> list[AuditLogEntryResponse]:
-        self._require_admin(actor)
-        rows = await audit_service.list_activity(session)
+        project_ids = await self._scope(session, actor)
+        rows = await audit_service.list_activity(session, project_ids=project_ids)
         return [AuditLogEntryResponse.model_validate(row, from_attributes=True) for row in rows]
 
     async def api_calls(
@@ -55,8 +63,8 @@ class AuditRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> list[AuditLogEntryResponse]:
-        self._require_admin(actor)
-        rows = await audit_service.list_api_calls(session)
+        project_ids = await self._scope(session, actor)
+        rows = await audit_service.list_api_calls(session, project_ids=project_ids)
         return [AuditLogEntryResponse.model_validate(row, from_attributes=True) for row in rows]
 
     async def failed_retrievals(
@@ -64,8 +72,8 @@ class AuditRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> list[AuditLogEntryResponse]:
-        self._require_admin(actor)
-        rows = await audit_service.list_failed_retrievals(session)
+        project_ids = await self._scope(session, actor)
+        rows = await audit_service.list_failed_retrievals(session, project_ids=project_ids)
         return [AuditLogEntryResponse.model_validate(row, from_attributes=True) for row in rows]
 
 

@@ -132,9 +132,14 @@
     cosmetic-only fix (nebula.naming's actual charset rule has always allowed mixed case), but missed
     this second occurrence on the rename/edit form; now neither input forces the displayed text to
     caps, so a deliberately mixed-case name reads back exactly as typed everywhere it's edited.
+    2026-08-12 (later same day, GitHub #7): each key row's description is now truncated to 250
+    characters with a trailing "…" (lib/utils.truncate, shared with EnvironmentsView.vue's table) —
+    the full text is still available via the element's `title` attribute on hover, and the Edit-key
+    dialog's Description Textarea is unaffected (openRenameDialog loads the untruncated
+    `key.description`), so a long description is never actually lost, only shortened in the table.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, tooltip, checkbox, alert-dialog, dialog, skeleton)
-  @version: 7.4.0
+  @version: 7.5.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-12
 -->
@@ -144,6 +149,7 @@ import { PhArrowLeft, PhCheck, PhCopy, PhDownload, PhEye, PhEyeSlash, PhGear, Ph
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { formatEnvFile, parseEnvFile } from '../lib/envFile';
+import { truncate } from '../lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -844,7 +850,9 @@ async function saveValue() {
                     <PhPencilSimple :size="12" weight="bold" />
                   </Button>
                 </div>
-                <div v-if="key.description" class="text-muted-foreground text-xs mt-0.5">{{ key.description }}</div>
+                <div v-if="key.description" class="text-muted-foreground text-xs mt-0.5" :title="key.description">
+                  {{ truncate(key.description, 250) }}
+                </div>
                 <div v-if="key.source_key_id" class="text-muted-foreground text-xs mt-0.5 flex items-center gap-1">
                   <PhLink :size="11" weight="bold" class="shrink-0" />
                   <button

@@ -6,9 +6,13 @@
   infra any project owner needs to be able to add to when creating a key) — delete is admin-only,
   since removing a global Environment can break every Project still linked to it
   (EnvironmentInUseError below surfaces as a 409 rather than letting an admin nuke it silently).
-@version: 2.0.0
+  2026-08-12 (GitHub #6): the 409 detail now names exactly which Project(s) still use the
+  Environment (nebula.environments.EnvironmentInUseError.project_names) instead of a generic "still
+  linked from at least one key" — a delete only succeeds once every referencing key, across every
+  Project, is deleted or reassigned elsewhere.
+@version: 2.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-08-12
 """
 
 import uuid
@@ -137,10 +141,14 @@ class EnvironmentRouter(Endpoint):
         try:
             environment_id_copy, environment_name = row.id, row.name
             await environments_service.delete_environment(session, row)
-        except EnvironmentInUseError:
+        except EnvironmentInUseError as exc:
+            names = ", ".join(exc.project_names)
             raise HTTPException(
                 status_code=409,
-                detail="This environment is still linked from at least one key and cannot be deleted",
+                detail=(
+                    f"Cannot delete — still used by project{'s' if len(exc.project_names) != 1 else ''}: "
+                    f"{names}. Remove or reassign every key using this environment first."
+                ),
             )
         await audit_service.record_user_action(
             session, actor, request,

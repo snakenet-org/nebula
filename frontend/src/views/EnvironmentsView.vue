@@ -6,27 +6,45 @@
     delete is admin-only (the backend 403s a non-admin; this view also just hides the delete
     action for a non-admin, mirroring ProjectSettingsView's own client-side-hide-only convention).
     secret_key_count is shown per row as a delete-safety hint — the backend 409s
-    (EnvironmentInUseError) if a still-linked Environment is deleted anyway.
+    (EnvironmentInUseError) if a still-linked Environment is deleted anyway; since 2026-08-12
+    (GitHub #6) that 409's detail names exactly which Project(s) are still using it
+    (nebula.environments.list_projects_using), surfaced verbatim via the existing
+    `toast.error(e.message)` catch — no new frontend plumbing needed, api.js already forwards the
+    backend's `detail` string as the thrown Error's message.
     2026-08-08: the row's Delete button recolored from `ghost` to the existing `destructive` Button
     variant — see ProjectView.vue's header for the fuller rationale.
+    2026-08-12 (GitHub #6): name/description on both the create form and the edit dialog now strip
+    any pasted `\r`/`\n` on write (computed get/set wrapping a raw ref, same pattern
+    ProjectView.vue's Edit-key Name field already established) — name's charset was already
+    line-break-free server-side (nebula.naming), but description had none, and the edit dialog's
+    Description field used to be a multi-line Textarea where Enter genuinely inserted a real
+    newline, not just a pasted one. That Textarea is now a plain single-line Input, matching what
+    the create form's Description field already was, so line breaks are structurally impossible to
+    type, not just stripped after the fact. The backend (nebula.models.environment) also now strips
+    `\r`/`\n` from `description` independently, so an API caller bypassing this UI can't reintroduce
+    one either.
+    2026-08-12 (later same day, GitHub #7): the table's Description cell is now truncated to 250
+    characters with a trailing "…" (`truncate()` below) — the full text is still available via the
+    cell's `title` attribute on hover, and editing a long description is unaffected (openEdit loads
+    the untruncated `env.description` into the edit dialog).
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, badge, button,
-    input, label, textarea, dialog, alert-dialog, skeleton)
-  @version: 1.1.0
+    input, label, dialog, alert-dialog, skeleton)
+  @version: 2.0.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-08
+  @date: 2026-08-12
 -->
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { PhStack, PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
+import { stripLineBreaks, truncate } from '../lib/utils';
 import { useAuth } from '../composables/useAuth';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
@@ -51,9 +69,20 @@ async function load() {
 onMounted(load);
 
 // ── Create ────────────────────────────────────────────────────────────────
+// Name/description are wrapped in computed get/set pairs that strip any pasted \r/\n on every
+// write (see lib/utils.stripLineBreaks) — name's charset was already line-break-free server-side
+// (nebula.naming), but description had no such restriction until GitHub #6.
 const showForm = ref(false);
 const creating = ref(false);
 const form = ref({ name: '', description: '' });
+const formName = computed({
+  get: () => form.value.name,
+  set: (v) => { form.value.name = stripLineBreaks(v); },
+});
+const formDescription = computed({
+  get: () => form.value.description,
+  set: (v) => { form.value.description = stripLineBreaks(v); },
+});
 async function createEnvironment() {
   if (!form.value.name.trim()) return;
   creating.value = true;
@@ -77,6 +106,14 @@ async function createEnvironment() {
 // ── Edit ──────────────────────────────────────────────────────────────────
 const editing = ref(null); // Environment being edited
 const editForm = ref({ name: '', description: '' });
+const editFormName = computed({
+  get: () => editForm.value.name,
+  set: (v) => { editForm.value.name = stripLineBreaks(v); },
+});
+const editFormDescription = computed({
+  get: () => editForm.value.description,
+  set: (v) => { editForm.value.description = stripLineBreaks(v); },
+});
 const savingEdit = ref(false);
 function openEdit(env) {
   editing.value = env;
@@ -136,11 +173,11 @@ async function deleteEnvironment() {
         <form @submit.prevent="createEnvironment" class="grid sm:grid-cols-2 gap-3">
           <div class="space-y-1.5">
             <Label for="new-env-name">Name</Label>
-            <Input id="new-env-name" v-model="form.name" placeholder="e.g. production" required />
+            <Input id="new-env-name" v-model="formName" placeholder="e.g. production" required />
           </div>
           <div class="space-y-1.5">
             <Label for="new-env-description">Description</Label>
-            <Input id="new-env-description" v-model="form.description" placeholder="Description (optional)" />
+            <Input id="new-env-description" v-model="formDescription" placeholder="Description (optional)" />
           </div>
           <div class="sm:col-span-2 flex gap-2 justify-end">
             <Button type="button" variant="outline" @click="showForm = false">Cancel</Button>
@@ -173,7 +210,9 @@ async function deleteEnvironment() {
         <TableBody>
           <TableRow v-for="env in environments" :key="env.id">
             <TableCell class="font-semibold">{{ env.name }}</TableCell>
-            <TableCell class="text-muted-foreground">{{ env.description || '—' }}</TableCell>
+            <TableCell class="text-muted-foreground" :title="env.description || ''">
+              {{ truncate(env.description, 250) || '—' }}
+            </TableCell>
             <TableCell><Badge variant="outline">{{ env.secret_key_count }}</Badge></TableCell>
             <TableCell class="text-right whitespace-nowrap">
               <Button variant="ghost" size="icon-xs" title="Edit" @click="openEdit(env)">
@@ -202,11 +241,11 @@ async function deleteEnvironment() {
         <form @submit.prevent="saveEdit" class="space-y-3">
           <div class="space-y-1.5">
             <Label for="edit-env-name">Name</Label>
-            <Input id="edit-env-name" v-model="editForm.name" required />
+            <Input id="edit-env-name" v-model="editFormName" required />
           </div>
           <div class="space-y-1.5">
             <Label for="edit-env-description">Description</Label>
-            <Textarea id="edit-env-description" v-model="editForm.description" rows="3" />
+            <Input id="edit-env-description" v-model="editFormDescription" placeholder="Description (optional)" />
           </div>
           <DialogFooter>
             <Button type="submit" :disabled="savingEdit">Save</Button>

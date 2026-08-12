@@ -1,19 +1,25 @@
 <!--
   @ai-purpose: Dashboard — the new home/start page. Stat cards + daily API-request/extraction/
     failure charts.
-  @ai-context: Counts (nebula.dashboard.summary_counts) are system-wide, not scoped to the caller's
-    own Projects — see that module's docstring. Three single-series charts (never one dual-axis
-    chart — different metrics, different scales): API requests (EVERY call to ANY api/v1/vault.py
-    route — /secret, /project, /status — by a Project access key, success or not, renamed from
-    "API extractions" 2026-08-07 to reflect that it's no longer /secret-only), frontend extractions
-    (a logged-in human's successful secret.reveal), and failed attempts (the same vault.py routes'
-    success=False rows, across all three — this is also exactly what the Audit Logs page's "Failed
-    retrievals" tab lists row-by-row). Every authenticated user sees this page; project browsing
-    moved to its own /projects route (HomeView.vue, unchanged) now that / is the Dashboard.
+  @ai-context: Counts/series (nebula.dashboard.summary_counts/extraction_series) are system-wide for
+    an admin, but scoped to the caller's own owned+editor Projects for a non-admin (GitHub #4,
+    api/v1/dashboard.py resolves the scope server-side via
+    nebula.projects.list_editable_project_ids) — see that module's docstring for exactly what each
+    stat means once scoped (environment_count in particular becomes "distinct Environments actually
+    used by my Projects' keys", not the global Environment count). This view does no scoping itself,
+    it only renders whatever the API already returned. Three single-series charts (never one
+    dual-axis chart — different metrics, different scales): API requests (EVERY call to ANY
+    api/v1/vault.py route — /secret, /project, /status — by a Project access key, success or not,
+    renamed from "API extractions" 2026-08-07 to reflect that it's no longer /secret-only), frontend
+    extractions (a logged-in human's successful secret.reveal), and failed attempts (the same
+    vault.py routes' success=False rows, across all three — this is also exactly what the Audit Logs
+    page's "Failed retrievals" tab lists row-by-row). Every authenticated user sees this page;
+    project browsing moved to its own /projects route (HomeView.vue, unchanged) now that / is the
+    Dashboard.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, skeleton)
-  @version: 1.1.0
+  @version: 1.2.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-07
+  @date: 2026-08-12
 -->
 <script setup>
 import { computed, onMounted, ref } from 'vue';

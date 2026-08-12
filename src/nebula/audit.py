@@ -34,13 +34,21 @@
   only object_label, a display string), same as secret.py's reveal_value already did — required for
   either action to be attributable to a specific key by id rather than by fragile name matching
   that would break silently across a rename.
+  2026-08-12: list_activity/list_api_calls/list_failed_retrievals/daily_counts all gained an optional
+  `project_ids` filter (GitHub #4) — a non-admin caller now sees the Audit Logs page and Dashboard
+  scoped to only the Projects they own or are an EDITOR share on
+  (nebula.projects.list_editable_project_ids), resolved by api/v1/audit.py and api/v1/dashboard.py;
+  admins keep passing `project_ids=None` for the unscoped, app-wide view. Scoping by `project_id IN
+  (...)` also naturally drops rows with no project at all (global Environment CRUD, auth.login/
+  logout/refresh) for a non-admin — intentional, since those aren't "audit logs of a project they
+  own or edit."
 @ai-rules:
   - Never put a plaintext secret value in `detail` or any other column.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 1.2.0
+@version: 1.3.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-09
+@date: 2026-08-12
 """
 
 import uuid
@@ -158,33 +166,63 @@ async def record_access_key_action(
     )
 
 
-async def list_activity(session: AsyncSession, *, limit: int = 200) -> list[AuditLogEntry]:
-    """Human (ActorType.USER) actions, newest first — the Audit Logs page's "Activity" tab."""
+async def list_activity(
+    session: AsyncSession, *, limit: int = 200, project_ids: Sequence[uuid.UUID] | None = None
+) -> list[AuditLogEntry]:
+    """Human (ActorType.USER) actions, newest first — the Audit Logs page's "Activity" tab.
+
+    `project_ids=None` (admin) returns every row app-wide. A non-None sequence (a non-admin's
+    owned+editor Projects, see nebula.projects.list_editable_project_ids) scopes to only rows whose
+    `project_id` is in that set — this also naturally excludes actions with no project at all (global
+    Environment CRUD, auth.login/logout/refresh), which is intentional: a non-admin sees audit logs
+    OF THEIR PROJECTS, not the whole app's activity.
+    """
+    conditions = [AuditLogEntry.actor_type == ActorType.USER]
+    if project_ids is not None:
+        conditions.append(AuditLogEntry.project_id.in_(project_ids))
     result = await session.execute(
         select(AuditLogEntry)
-        .where(AuditLogEntry.actor_type == ActorType.USER)
+        .where(*conditions)
         .order_by(AuditLogEntry.occurred_at.desc())
         .limit(limit)
     )
     return list(result.scalars().all())
 
 
-async def list_api_calls(session: AsyncSession, *, limit: int = 200) -> list[AuditLogEntry]:
-    """Access-key (ActorType.ACCESS_KEY) calls, newest first — the "API calls" tab."""
+async def list_api_calls(
+    session: AsyncSession, *, limit: int = 200, project_ids: Sequence[uuid.UUID] | None = None
+) -> list[AuditLogEntry]:
+    """Access-key (ActorType.ACCESS_KEY) calls, newest first — the "API calls" tab.
+
+    See list_activity's docstring for what `project_ids=None` vs. a scoped sequence means — every
+    vault.py call already carries a project_id (it's always dispatched against one Project's access
+    key), so scoping here never drops a row for a spurious "no project" reason.
+    """
+    conditions = [AuditLogEntry.actor_type == ActorType.ACCESS_KEY]
+    if project_ids is not None:
+        conditions.append(AuditLogEntry.project_id.in_(project_ids))
     result = await session.execute(
         select(AuditLogEntry)
-        .where(AuditLogEntry.actor_type == ActorType.ACCESS_KEY)
+        .where(*conditions)
         .order_by(AuditLogEntry.occurred_at.desc())
         .limit(limit)
     )
     return list(result.scalars().all())
 
 
-async def list_failed_retrievals(session: AsyncSession, *, limit: int = 200) -> list[AuditLogEntry]:
-    """Failed calls to any api/v1/vault.py route, newest first — the "Failed retrievals" tab."""
+async def list_failed_retrievals(
+    session: AsyncSession, *, limit: int = 200, project_ids: Sequence[uuid.UUID] | None = None
+) -> list[AuditLogEntry]:
+    """Failed calls to any api/v1/vault.py route, newest first — the "Failed retrievals" tab.
+
+    See list_activity's docstring for what `project_ids=None` vs. a scoped sequence means.
+    """
+    conditions = [AuditLogEntry.action.in_(VAULT_ACTIONS), AuditLogEntry.success.is_(False)]
+    if project_ids is not None:
+        conditions.append(AuditLogEntry.project_id.in_(project_ids))
     result = await session.execute(
         select(AuditLogEntry)
-        .where(AuditLogEntry.action.in_(VAULT_ACTIONS), AuditLogEntry.success.is_(False))
+        .where(*conditions)
         .order_by(AuditLogEntry.occurred_at.desc())
         .limit(limit)
     )
@@ -198,12 +236,15 @@ async def daily_counts(
     actor_type: ActorType,
     success: bool | None,
     days: int,
+    project_ids: Sequence[uuid.UUID] | None = None,
 ) -> dict[date, int]:
     """Per-day counts of `action` (one action, or any of several) over the trailing `days` — backs
     nebula.dashboard's charts.
 
     Returns every day in the window (zero-filled), not just days with activity, so a chart never has
-    to reconstruct missing dates itself.
+    to reconstruct missing dates itself. `project_ids=None` (admin) counts app-wide; a scoped
+    sequence (nebula.projects.list_editable_project_ids) restricts to those Projects' rows only —
+    see list_activity's docstring for the same admin-vs-scoped shape.
     """
     since = datetime.utcnow() - timedelta(days=days - 1)
     day_expr = func.date_trunc("day", AuditLogEntry.occurred_at)
@@ -219,6 +260,8 @@ async def daily_counts(
     ]
     if success is not None:
         conditions.append(AuditLogEntry.success.is_(success))
+    if project_ids is not None:
+        conditions.append(AuditLogEntry.project_id.in_(project_ids))
 
     result = await session.execute(
         select(day_expr, func.count()).where(*conditions).group_by(day_expr)
