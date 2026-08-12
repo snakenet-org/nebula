@@ -62,6 +62,15 @@
   bulk query (nebula.audit.extraction_counts_by_project) and passes each key's value in explicitly
   to avoid an N+1 audit query per row; every other route builds a single-key response and lets
   `_to_response` look its own count up individually (extraction_count_for_key).
+  Since 2026-08-12 (later same day): create_key/set_value thread an optional
+  `rotation_frequency`/`rotation_unit` schedule (nebula.rotation) through to nebula.secrets, 422ing
+  RotationNotSupportedError (a reference key, or a non-SECRET variable_type — models/secret.py's
+  Pydantic validators already reject most of these client-side, this is a server-side backstop).
+  `_to_response` also now echoes the schedule + `last_rotated_at` (this row's own columns, never
+  resolved through a reference). Also new: `POST /{project_id}/{key_id}/copy` — audit-log-only (no
+  value in the request/response at all) for the frontend's copy-to-clipboard button, gated the same
+  as actually being allowed to hold that plaintext (can_reveal for a SECRET, mere project visibility
+  for a VARIABLE, matching ProjectView.vue's copy-button v-if).
 @ai-rules:
   - Never include SecretKey.ciphertext or a decrypted value in any response except reveal_value's.
   - A GitHub sync failure triggered by _auto_sync_github must never surface as an error response for
@@ -71,9 +80,9 @@
     existence/no-chaining checks as a substitute for that permission check.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 5.2.0
+@version: 6.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-09
+@date: 2026-08-12
 """
 
 import uuid
@@ -103,6 +112,7 @@ from nebula.secrets import (
     BulkCreateConflictError,
     BulkDuplicateKeyNamesError,
     DuplicateSecretKeyNameError,
+    RotationNotSupportedError,
     SecretKeyInUseAsPatSourceError,
     SecretKeyInUseAsReferenceSourceError,
     SecretKeyIsReferenceError,
@@ -186,6 +196,9 @@ async def _to_response(
         source_project_id=source_project_id,
         source_label=source_label,
         extraction_count=extraction_count,
+        rotation_frequency=key.rotation_frequency,
+        rotation_unit=key.rotation_unit,
+        last_rotated_at=key.last_rotated_at,
         created_at=key.created_at,
         updated_at=key.updated_at,
     )
@@ -219,6 +232,9 @@ class SecretRouter(Endpoint):
             self.reveal_value,
             methods=["GET"],
             response_model=SecretRevealResponse,
+        )
+        self.add_api_route(
+            "/{project_id}/{key_id}/copy", self.log_copy, methods=["POST"], status_code=204
         )
 
     async def _project_or_404(self, session: AsyncSession, actor: UserAccount, project_id: uuid.UUID):
@@ -319,6 +335,8 @@ class SecretRouter(Endpoint):
                 value=payload.value,
                 sync_enabled=payload.sync_enabled,
                 source_key_id=source_key_id,
+                rotation_frequency=payload.rotation_frequency,
+                rotation_unit=payload.rotation_unit,
             )
         except DuplicateSecretKeyNameError:
             raise HTTPException(status_code=409, detail="A key with this name already exists")
@@ -329,6 +347,11 @@ class SecretRouter(Endpoint):
         except SourceKeyIsReferenceError:
             raise HTTPException(
                 status_code=422, detail="Cannot reference a key that is itself a reference"
+            )
+        except RotationNotSupportedError:
+            raise HTTPException(
+                status_code=422,
+                detail="Automatic rotation only applies to a directly-valued secret.",
             )
         await audit_service.record_user_action(
             session, actor, request,
@@ -468,12 +491,22 @@ class SecretRouter(Endpoint):
         key = await self._key_or_404(session, project_id, key_id)
         try:
             key = await secrets_service.set_value(
-                session, key, plaintext=payload.value, updated_by=actor.id
+                session,
+                key,
+                plaintext=payload.value,
+                updated_by=actor.id,
+                rotation_frequency=payload.rotation_frequency,
+                rotation_unit=payload.rotation_unit,
             )
         except SecretKeyIsReferenceError:
             raise HTTPException(
                 status_code=409,
                 detail="This key's value can only be changed in its source project.",
+            )
+        except RotationNotSupportedError:
+            raise HTTPException(
+                status_code=422,
+                detail="Automatic rotation only applies to a secret, not a variable.",
             )
         await audit_service.record_user_action(
             session, actor, request,
@@ -514,6 +547,33 @@ class SecretRouter(Endpoint):
             object_label=key.name, project_id=project_id,
         )
         return SecretRevealResponse(key=key.name, environment=environment.name, value=value)
+
+    async def log_copy(
+        self,
+        project_id: uuid.UUID,
+        key_id: uuid.UUID,
+        request: Request,
+        actor: UserAccount = Depends(get_current_user),
+        session: AsyncSession = Depends(get_session),
+    ) -> None:
+        """Audit-log only — the frontend already has the plaintext in hand (either already-revealed,
+        or a variable's value, which ships in the list response) by the time it calls this; no value
+        ever crosses the wire here. Same permission bar as actually being ALLOWED to have that
+        plaintext in the first place: can_reveal for a SECRET, just can_view (project visibility
+        alone) for a VARIABLE, since those already ship unmasked to anyone who can see the Project.
+        """
+        project, share = await self._project_or_404(session, actor, project_id)
+        key = await self._key_or_404(session, project_id, key_id)
+        variable_type, _ciphertext = await secrets_service.resolve_effective(session, key)
+        if variable_type == VariableType.SECRET and not projects_service.can_reveal(actor, project, share):
+            raise HTTPException(
+                status_code=403, detail="You do not have permission to copy values in this project"
+            )
+        await audit_service.record_user_action(
+            session, actor, request,
+            action="secret.copy", object_type="secret_key", object_id=key.id,
+            object_label=key.name, project_id=project_id,
+        )
 
 
 router = SecretRouter()

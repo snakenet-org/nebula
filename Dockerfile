@@ -78,6 +78,7 @@ RUN uv sync --frozen --no-install-project --no-dev
 COPY main.py alembic.ini README.md ./
 COPY src/ src/
 COPY migrations/ migrations/
+COPY scripts/ scripts/
 COPY entrypoint.sh ./
 
 # Install the project itself now that the source is present.

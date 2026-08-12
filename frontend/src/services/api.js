@@ -12,7 +12,11 @@
 //   take an optional { search, page, pageSize } and build a query string (auditQuery) — the Audit
 //   Logs page pages server-side now (300 rows/page max, nebula.audit.MAX_PAGE_SIZE) instead of
 //   pulling the whole log in one response.
-// @version: 2.5.0
+//   2026-08-12 (later same day): new logSecretCopy — audit-log-only, fired after a successful
+//   clipboard copy in ProjectView.vue; createSecret/setSecretValue's payloads may now also carry an
+//   optional rotation_frequency/rotation_unit (nebula.rotation), unchanged shape here since both
+//   already just forward whatever payload object they're given.
+// @version: 2.6.0
 // @author: Marc Fiedler <marc@snakenet.org>
 // @date: 2026-08-12
 import { useAuth } from '../composables/useAuth';
@@ -131,6 +135,9 @@ export const bulkCreateSecrets = (projectId, payload) =>
   request('POST', `/api/v1/secret/${projectId}/bulk`, payload);
 export const revealSecretValue = (projectId, keyId) =>
   request('GET', `/api/v1/secret/${projectId}/${keyId}/reveal`);
+// Audit-log-only — no value is ever sent; fire this after a successful clipboard write.
+export const logSecretCopy = (projectId, keyId) =>
+  request('POST', `/api/v1/secret/${projectId}/${keyId}/copy`);
 
 // ── Access keys ───────────────────────────────────────────────────────────
 export const listAccessKeys = (projectId) => request('GET', `/api/v1/access_key/${projectId}`);

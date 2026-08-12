@@ -36,21 +36,50 @@
   nebula.audit.extraction_counts_by_project (list_keys, one query for the whole page) or
   extraction_count_for_key (single-key responses) — never stored on SecretKey itself. Backs
   ProjectView.vue's per-key info ("extracted N times") / warning ("never extracted") icon.
-@version: 4.1.0
+  Since 2026-08-12 (later same day), `_RotationScheduleMixin` (shared by SecretKeyCreateRequest and
+  SecretValueSetRequest) adds an optional `rotation_frequency`/`rotation_unit` automatic-rotation
+  schedule (nebula.rotation) — both fields must be given together or both omitted (validated here);
+  SecretKeyCreateRequest additionally rejects the combination against a reference (`source_key_id`)
+  or a non-SECRET `variable_type`, since rotation only makes sense for a directly-valued secret —
+  nebula.secrets.RotationNotSupportedError is the same rule enforced again server-side as a
+  backstop. SecretKeyResponse exposes the schedule (+ `last_rotated_at`) as this row's OWN columns
+  always, never resolved through a reference.
+@version: 5.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-09
+@date: 2026-08-12
 """
 
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from nebula.models.tables import VariableType
+from nebula.models.tables import RotationUnit, VariableType
 from nebula.naming import validate_name
 
 
-class SecretKeyCreateRequest(BaseModel):
+class _RotationScheduleMixin(BaseModel):
+    """Shared validator for the two request models that can carry a rotation schedule
+    (SecretKeyCreateRequest, SecretValueSetRequest) — see nebula.rotation. Both fields must be
+    given together or both omitted; a schedule is meaningless without a cadence unit and vice versa.
+    Whether rotation is even ALLOWED here (SECRET type, non-reference) is enforced further down by
+    each model's own validator / by nebula.secrets.RotationNotSupportedError as a backstop — this
+    mixin only checks the pair's own internal shape.
+    """
+
+    rotation_frequency: int | None = Field(default=None, gt=0, le=999)
+    rotation_unit: RotationUnit | None = None
+
+    @model_validator(mode="after")
+    def _validate_rotation_pair(self) -> "_RotationScheduleMixin":
+        if (self.rotation_frequency is None) != (self.rotation_unit is None):
+            raise ValueError(
+                "Rotation needs both a frequency and a unit (weeks/months/years), or neither."
+            )
+        return self
+
+
+class SecretKeyCreateRequest(_RotationScheduleMixin):
     name: str
     description: str | None = None
     environment_id: uuid.UUID
@@ -67,6 +96,13 @@ class SecretKeyCreateRequest(BaseModel):
         if self.source_key_id is not None and self.value:
             raise ValueError(
                 "A referenced key's value comes from its source — do not set one directly."
+            )
+        if self.rotation_frequency is not None and (
+            self.source_key_id is not None or self.variable_type != VariableType.SECRET
+        ):
+            raise ValueError(
+                "Automatic rotation only applies to a directly-valued secret, not a reference or a "
+                "variable."
             )
         return self
 
@@ -134,11 +170,17 @@ class SecretKeyResponse(BaseModel):
     # How many times this key's value has actually been retrieved (nebula.audit.EXTRACTION_ACTIONS,
     # success=True only) — see the module docstring.
     extraction_count: int
+    # Automatic-rotation schedule (nebula.rotation) — both null means rotation is disabled. Always
+    # this row's OWN columns, never resolved through a reference (a reference key can't carry a
+    # schedule at all — see nebula.secrets.RotationNotSupportedError).
+    rotation_frequency: int | None = None
+    rotation_unit: RotationUnit | None = None
+    last_rotated_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
 
-class SecretValueSetRequest(BaseModel):
+class SecretValueSetRequest(_RotationScheduleMixin):
     value: str
 
 

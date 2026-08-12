@@ -153,9 +153,28 @@
     text). Matches DashboardView.vue's stat tile, which already read "Variables". "Environment" on
     its own (the global dev/staging/prod entity, e.g. the per-row Environment Select/filter) is
     untouched — only the compound phrase "environment variable" was in scope.
+    2026-08-12 (later same day, rotation + copy audit logging): (1) both the New key dialog's "Set
+    value" tab and the per-row "Set value" edit Dialog gained an optional automatic-rotation section
+    (number input + Weeks/Months/Years Select, `newKey.rotation_frequency`/`.rotation_unit` and
+    `editingRotationFrequency`/`editingRotationUnit` respectively — see nebula.rotation), shown only
+    for `variable_type === 'secret'` (rotation is a secret-only concept — a variable's value is
+    never anonymized/secret in the first place). Giving a frequency without a unit (or vice versa)
+    is rejected client-side before the request even goes out (same toast-then-return pattern as the
+    existing reference-picker validation). The edit Dialog also gained the exact same trailing
+    "Generate" icon button the New key dialog's Value field already had (generateEditingValue,
+    identical `generateSecurePassword(35)` fill). saveValue() now always sends the CURRENT on-screen
+    rotation_frequency/rotation_unit alongside the value on every submit — a full replace, not a
+    partial patch (matches nebula.secrets.set_value's own "no omitted-means-unchanged" shape for
+    this pair) — so clearing both fields and saving disables rotation. openEditor() prefills both
+    from the key's existing schedule (unlike editingValue, which never prefills the actual
+    plaintext) so opening "Set value" doubles as reviewing the current cadence. (2) copyValue() now
+    also fires api.logSecretCopy (fire-and-forget, errors swallowed) right after a successful
+    clipboard write — the "always audit-log a mutating/extracting action" rule (see CLAUDE.md)
+    applied to the one action that previously left no trail at all, since a quick copy never even
+    calls revealSecretValue when the row is already expanded.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, tooltip, checkbox, alert-dialog, dialog, skeleton)
-  @version: 8.1.0
+  @version: 9.0.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-12
 -->
@@ -237,7 +256,12 @@ const filteredKeys = computed(() => {
 
 // ── New secret key ───────────────────────────────────────────────────────
 const showKeyForm = ref(false);
-const emptyNewKey = () => ({ name: '', description: '', environment_id: '', variable_type: 'secret', value: '' });
+const emptyNewKey = () => ({
+  name: '', description: '', environment_id: '', variable_type: 'secret', value: '',
+  // Automatic-rotation schedule (nebula.rotation) — both blank means disabled. Kept as strings
+  // (Select/number-input model values) and only coerced to a number / sent at all in addKey().
+  rotation_frequency: '', rotation_unit: '',
+});
 const newKey = ref(emptyNewKey());
 const savingKey = ref(false);
 
@@ -315,6 +339,15 @@ async function addKey() {
     toast.error('Pick a project and a secret to reference.');
     return;
   }
+  if (
+    newKeyValueMode.value === 'direct' &&
+    newKey.value.variable_type === 'secret' &&
+    newKey.value.rotation_frequency &&
+    !newKey.value.rotation_unit
+  ) {
+    toast.error('Choose a rotation unit, or leave the frequency blank to disable rotation.');
+    return;
+  }
   savingKey.value = true;
   try {
     const payload = {
@@ -327,6 +360,10 @@ async function addKey() {
     } else {
       payload.variable_type = newKey.value.variable_type;
       payload.value = newKey.value.value || null;
+      if (newKey.value.variable_type === 'secret' && newKey.value.rotation_frequency) {
+        payload.rotation_frequency = Number(newKey.value.rotation_frequency);
+        payload.rotation_unit = newKey.value.rotation_unit;
+      }
     }
     const key = await api.createSecret(props.projectId, payload);
     keys.value.push(key);
@@ -584,6 +621,9 @@ async function toggleReveal(key) {
 // value hasn't been revealed yet is fetched on demand (same revealSecretValue call the Eye button
 // uses, same canReveal gate below) and copied straight to the clipboard without populating
 // `revealed` — a "quick copy" shouldn't force the plaintext to also appear on screen.
+// Every successful copy is also audit-logged (logSecretCopy — no value ever leaves the browser in
+// that call, it's a bare fire-and-forget POST) per the standing "always audit-log" rule; a logging
+// failure is swallowed rather than surfaced, since the copy itself already succeeded by then.
 const copiedIds = reactive({});
 async function copyValue(key) {
   try {
@@ -596,6 +636,7 @@ async function copyValue(key) {
     await navigator.clipboard?.writeText(value);
     copiedIds[key.id] = true;
     setTimeout(() => delete copiedIds[key.id], 1500);
+    api.logSecretCopy(props.projectId, key.id).catch(() => {});
   } catch (e) {
     toast.error(e.message);
   }
@@ -609,20 +650,43 @@ const valueDialogOpen = ref(false);
 const editingKey = ref(null);
 const editingValue = ref('');
 const savingValue = ref(false);
+// Automatic-rotation schedule (nebula.rotation) — prefilled from the key's CURRENT schedule on open
+// (unlike editingValue, which never prefills the actual plaintext) so editing a value doubles as
+// reviewing/adjusting its rotation cadence. setSecretValue always sends whatever this holds on
+// submit (a full replace, not a partial patch) — clearing both fields disables rotation.
+const editingRotationFrequency = ref('');
+const editingRotationUnit = ref('');
 function openEditor(key) {
   editingKey.value = key;
   editingValue.value = '';
+  editingRotationFrequency.value = key.rotation_frequency ? String(key.rotation_frequency) : '';
+  editingRotationUnit.value = key.rotation_unit || '';
   valueDialogOpen.value = true;
 }
 function closeEditor() {
   valueDialogOpen.value = false;
 }
+// Same convenience fill as the New key dialog's Generate button — see generateNewKeyValue.
+function generateEditingValue() {
+  editingValue.value = generateSecurePassword(35);
+}
 async function saveValue() {
   const target = editingKey.value;
   if (!target) return;
+  if (editingRotationFrequency.value && !editingRotationUnit.value) {
+    toast.error('Choose a rotation unit, or clear the frequency to disable rotation.');
+    return;
+  }
   savingValue.value = true;
   try {
-    const updated = await api.setSecretValue(props.projectId, target.id, { value: editingValue.value });
+    const payload = { value: editingValue.value };
+    if (target.variable_type === 'secret') {
+      payload.rotation_frequency = editingRotationFrequency.value
+        ? Number(editingRotationFrequency.value)
+        : null;
+      payload.rotation_unit = editingRotationFrequency.value ? editingRotationUnit.value : null;
+    }
+    const updated = await api.setSecretValue(props.projectId, target.id, payload);
     const idx = keys.value.findIndex((k) => k.id === updated.id);
     if (idx !== -1) keys.value[idx] = updated;
     delete revealed[updated.id];
@@ -941,6 +1005,32 @@ async function saveValue() {
                   </button>
                 </div>
               </div>
+
+              <div v-if="newKey.variable_type === 'secret'" class="sm:col-span-2 space-y-1.5">
+                <Label for="new-key-rotation-frequency">Automatic rotation (optional)</Label>
+                <div class="flex items-center gap-2">
+                  <Input
+                    id="new-key-rotation-frequency"
+                    v-model="newKey.rotation_frequency"
+                    type="number"
+                    min="1"
+                    max="999"
+                    placeholder="e.g. 90"
+                    class="w-24"
+                  />
+                  <Select v-model="newKey.rotation_unit">
+                    <SelectTrigger class="flex-1"><SelectValue placeholder="Choose a unit" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="week">Weeks</SelectItem>
+                      <SelectItem value="month">Months</SelectItem>
+                      <SelectItem value="year">Years</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p class="text-muted-foreground text-xs">
+                  Automatically re-generate this secret's value on this schedule. Leave blank to disable.
+                </p>
+              </div>
             </TabsContent>
 
             <TabsContent value="reference" class="space-y-3 pt-3">
@@ -1109,7 +1199,48 @@ async function saveValue() {
         <form @submit.prevent="saveValue" class="space-y-3">
           <div class="space-y-1.5">
             <Label for="edit-value">Value</Label>
-            <Input id="edit-value" v-model="editingValue" placeholder="value" autofocus class="font-mono" />
+            <div class="relative">
+              <Input
+                id="edit-value"
+                v-model="editingValue"
+                placeholder="value"
+                autofocus
+                class="font-mono pr-8"
+              />
+              <button
+                type="button"
+                title="Generate a 35-character secure password"
+                class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                @click="generateEditingValue"
+              >
+                <PhArrowsClockwise :size="14" weight="bold" />
+              </button>
+            </div>
+          </div>
+          <div v-if="editingKey?.variable_type === 'secret'" class="space-y-1.5">
+            <Label for="edit-rotation-frequency">Automatic rotation (optional)</Label>
+            <div class="flex items-center gap-2">
+              <Input
+                id="edit-rotation-frequency"
+                v-model="editingRotationFrequency"
+                type="number"
+                min="1"
+                max="999"
+                placeholder="e.g. 90"
+                class="w-24"
+              />
+              <Select v-model="editingRotationUnit">
+                <SelectTrigger class="flex-1"><SelectValue placeholder="Choose a unit" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="week">Weeks</SelectItem>
+                  <SelectItem value="month">Months</SelectItem>
+                  <SelectItem value="year">Years</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <p class="text-muted-foreground text-xs">
+              Automatically re-generate this secret's value on this schedule. Leave blank to disable.
+            </p>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" @click="valueDialogOpen = false">Cancel</Button>

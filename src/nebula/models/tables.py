@@ -43,6 +43,10 @@
   action log — see nebula.audit) — VaultMeta (single-row table, one Fernet-encrypted canary value
   checked at startup — see nebula.crypto's module docstring and main.py's lifespan — to fail fast on
   a wrong NEBULA_MASTER_KEY instead of a confusing per-request 500 later).
+  Since 2026-08-12 (later same day), a SecretKey also carries an optional automatic-rotation
+  schedule — `rotation_frequency` (a positive int) + `rotation_unit` (RotationUnit: week/month/year)
+  — and `last_rotated_at` (when its current value was put in place). See nebula.rotation for the
+  due-check/generation logic and scripts/rotate_secrets.py for the hourly process that acts on it.
 @ai-rules:
   - `SecretKey.ciphertext`/`ProjectGithubSync.pat_ciphertext` must only ever be written via
     nebula.crypto.encrypt_value and read via nebula.crypto.decrypt_value — never assign/return raw.
@@ -53,9 +57,11 @@
     by `ck_secret_keys_reference_no_own_value`, enforced app-side in nebula.secrets) — and never let
     a key that already has a `source_key_id` be picked as ANOTHER key's `source_key_id` (no
     chaining) or as its own (backstopped by `ck_secret_keys_reference_not_self`).
+  - Never set `rotation_frequency`/`rotation_unit` on a reference key or a non-SECRET key — see
+    nebula.secrets.RotationNotSupportedError.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 6.1.0
+@version: 6.2.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-12
 """
@@ -70,6 +76,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     func,
@@ -153,6 +160,14 @@ class VariableType(str, enum.Enum):
     SECRET = "secret"
 
 
+class RotationUnit(str, enum.Enum):
+    """The cadence unit for a SecretKey's automatic-rotation schedule — see nebula.rotation."""
+
+    WEEK = "week"
+    MONTH = "month"
+    YEAR = "year"
+
+
 class Environment(Base):
     """Global — NOT project-scoped. A shared taxonomy any project's SecretKeys link into."""
 
@@ -188,6 +203,16 @@ class SecretKey(Base):
         CheckConstraint(
             "source_key_id IS NULL OR source_key_id <> id",
             name="ck_secret_keys_reference_not_self",
+        ),
+        # Automatic-rotation schedule (see nebula.rotation) — rotation_frequency/rotation_unit are
+        # either both set (rotation enabled) or both null (disabled), never just one.
+        CheckConstraint(
+            "(rotation_frequency IS NULL) = (rotation_unit IS NULL)",
+            name="ck_secret_keys_rotation_pair",
+        ),
+        CheckConstraint(
+            "rotation_frequency IS NULL OR rotation_frequency > 0",
+            name="ck_secret_keys_rotation_frequency_positive",
         ),
     )
 
@@ -228,6 +253,19 @@ class SecretKey(Base):
     # sync target's push, both the automatic on-change hook and a manual "Sync now". Defaults true so
     # a key behaves exactly as before this column existed unless explicitly turned off.
     sync_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Automatic-rotation schedule, secret-only (see nebula.rotation/models/secret.py's validators) —
+    # both null means rotation is disabled for this key. scripts/rotate_secrets.py is the hourly
+    # process that actually acts on this: once rotation_frequency`d rotation_unit`s have passed since
+    # last_rotated_at, it re-generates the value with a fresh random secret and bumps
+    # last_rotated_at. Never set on a reference key (source_key_id) — it owns no value of its own to
+    # rotate; the SOURCE key is what would carry a schedule instead, in its own Project.
+    rotation_frequency: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rotation_unit: Mapped[RotationUnit | None] = mapped_column(String(5), nullable=True)
+    # When the current value was put in place — set at create_key (if a value was given) and at
+    # every set_value/automatic rotation. Distinct from `updated_at`, which also moves on a plain
+    # rename/description/environment/sync-toggle edit and would otherwise make "time since last
+    # rotation" wrong for a key that was merely renamed.
+    last_rotated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     updated_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("user_accounts.id", ondelete="SET NULL"), nullable=True
     )

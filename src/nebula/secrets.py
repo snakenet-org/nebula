@@ -46,6 +46,11 @@
   variable_type or value directly — "the value can only be changed in the source project" is
   enforced here, not just in the frontend; name/description/environment_id/sync_enabled stay freely
   editable on a reference key, since those are this row's own local metadata, not its value.
+  Since 2026-08-12 (later same day), create_key/set_value also accept an optional
+  `rotation_frequency`/`rotation_unit` automatic-rotation schedule (RotationNotSupportedError for a
+  reference key or a non-SECRET type — see nebula.rotation, which owns the actual due-check/
+  regeneration logic this module never performs itself) and stamp `last_rotated_at` whenever a value
+  is actually (re)set — create_key iff an initial `value` was given, set_value unconditionally.
 @ai-rules:
   - Never log a plaintext value.
   - encrypt_value/decrypt_value only — never import `cryptography` directly here.
@@ -53,19 +58,25 @@
     directly — a reference row's OWN columns (`variable_type`, `ciphertext`) must never be trusted.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 3.0.0
+@version: 3.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-09
+@date: 2026-08-12
 """
 
 import uuid
+from datetime import datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nebula.crypto import decrypt_value, encrypt_value
-from nebula.models.tables import ProjectGithubSync, SecretKey, VariableType
+from nebula.models.tables import (
+    ProjectGithubSync,
+    RotationUnit,
+    SecretKey,
+    VariableType,
+)
 
 
 class DuplicateSecretKeyNameError(Exception):
@@ -102,6 +113,14 @@ class SourceKeyIsReferenceError(Exception):
 class SecretKeyIsReferenceError(Exception):
     """Raised by set_value/update_key when asked to change a reference key's value or type
     directly — those are only ever changed by editing the SOURCE key, in its own Project."""
+
+
+class RotationNotSupportedError(Exception):
+    """Raised by create_key/set_value when a rotation schedule is given for a key that can't carry
+    one — a reference key (owns no value of its own to rotate) or a non-SECRET variable_type
+    (rotation is a secret-only concept — see models/secret.py's request validators, which are the
+    primary defense; this is a backstop against calling in here directly with an inconsistent
+    combination)."""
 
 
 class SecretValueNotFoundError(Exception):
@@ -205,13 +224,25 @@ async def create_key(
     value: str | None = None,
     sync_enabled: bool = True,
     source_key_id: uuid.UUID | None = None,
+    rotation_frequency: int | None = None,
+    rotation_unit: RotationUnit | str | None = None,
 ) -> SecretKey:
     """`source_key_id` makes this a REFERENCE key — see the module docstring. The caller
     (api/v1/secret.py) must have already permission-checked it (can_reveal on the source key's OWN
     Project); this only re-validates shape as a defense-in-depth backstop. When given, `value` is
     ignored (a reference's value always comes from the source) and `variable_type` is overridden to
     match the source's CURRENT type at creation time — cosmetic only, since every real read goes
-    through resolve_effective instead of this row's own column."""
+    through resolve_effective instead of this row's own column.
+
+    `rotation_frequency`/`rotation_unit` (see nebula.rotation) may only be given for a plain,
+    directly-valued SECRET key — raises RotationNotSupportedError otherwise (a reference key or a
+    non-SECRET variable_type). `last_rotated_at` is stamped now iff an initial value was actually
+    given, same "the value just changed" trigger set_value uses.
+    """
+    if (rotation_frequency is not None or rotation_unit is not None) and (
+        source_key_id is not None or variable_type != VariableType.SECRET
+    ):
+        raise RotationNotSupportedError(name)
     if source_key_id is not None:
         source = await session.get(SecretKey, source_key_id)
         if source is None:
@@ -231,6 +262,9 @@ async def create_key(
         updated_by=created_by if value else None,
         sync_enabled=sync_enabled,
         source_key_id=source_key_id,
+        rotation_frequency=rotation_frequency,
+        rotation_unit=rotation_unit,
+        last_rotated_at=datetime.utcnow() if value else None,
     )
     session.add(key)
     try:
@@ -292,17 +326,35 @@ async def delete_key(session: AsyncSession, key: SecretKey) -> None:
 
 
 async def set_value(
-    session: AsyncSession, key: SecretKey, *, plaintext: str, updated_by: uuid.UUID
+    session: AsyncSession,
+    key: SecretKey,
+    *,
+    plaintext: str,
+    updated_by: uuid.UUID,
+    rotation_frequency: int | None = None,
+    rotation_unit: RotationUnit | str | None = None,
 ) -> SecretKey:
-    """Encrypt and store the value for this key's (single, linked) Environment.
+    """Encrypt and store the value for this key's (single, linked) Environment, and stamp
+    last_rotated_at (see nebula.rotation) since the value just changed.
 
     Refuses on a reference key (SecretKeyIsReferenceError) — its value can only ever be changed by
-    editing the SOURCE key, in its own Project.
+    editing the SOURCE key, in its own Project. `rotation_frequency`/`rotation_unit` fully REPLACE
+    this key's rotation schedule (both None disables it) — unlike update_key's other fields, there's
+    no "omitted means unchanged" here, since the Set Value form always submits the schedule's
+    current on-screen state alongside the value. Raises RotationNotSupportedError for a non-SECRET
+    key given a schedule (see create_key's docstring for the same rule).
     """
     if key.source_key_id is not None:
         raise SecretKeyIsReferenceError(str(key.id))
+    if (rotation_frequency is not None or rotation_unit is not None) and (
+        key.variable_type != VariableType.SECRET
+    ):
+        raise RotationNotSupportedError(str(key.id))
     key.ciphertext = encrypt_value(plaintext)
     key.updated_by = updated_by
+    key.rotation_frequency = rotation_frequency
+    key.rotation_unit = rotation_unit
+    key.last_rotated_at = datetime.utcnow()
     await session.commit()
     await session.refresh(key)
     return key

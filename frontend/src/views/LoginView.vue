@@ -65,8 +65,17 @@
       top/left/size/glow-color/animation-delay) — a few of them tinted pale gold/cyan to echo the
       theme colors rather than all pure white — layered above `.stars-far`/`.stars-near` so "a few
       selected stars" read as genuinely brighter/bigger, not just more dots in the same tiled pattern.
+    **2026-08-12 (later same day) — removed the halo**: the "lensed halo" ellipse
+    (`bh-halo-grad`) + its own `haloStreamlines` ring set from the entry directly above turned out
+    to read as a separate bright/hazy sphere overlapping the black hole in an actual screenshot,
+    not as thin lensed arcs above/below the event horizon — since it's a nearly-circular (`rx`≈`ry`)
+    FILLED ellipse rather than a stroke, the mid-radius "hot" gradient stop glowed across its whole
+    annulus at once instead of forming a crisp ring, and its size/opacity (0.85) made it compete
+    with the flat disk rather than sit subtly behind it. Removed entirely per explicit feedback —
+    the flat edge-on disk (`bh-disk-grad` + `diskStreamlines`), the Doppler-beaming overlay, the
+    photon ring, and the event horizon are unchanged and were confirmed to already look right.
   @dependencies: vue, vue-sonner, shadcn-vue (card, input, label, button)
-  @version: 5.0.0
+  @version: 5.1.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-12
 -->
@@ -101,24 +110,6 @@ function mixHex(hexA, hexB, t) {
   const bl = Math.round((a & 255) + (((b & 255) - (a & 255)) * t));
   return `rgb(${r}, ${g}, ${bl})`;
 }
-
-// The rounder, near-circular halo ring — the lensed image of the disk's far side, bent by gravity
-// to appear above/below the event horizon rather than hidden behind it. Radius grows and both
-// opacity/stroke-width taper outward, `t` sweeping 0 (hot inner edge) → 1 (cool outer edge).
-const HALO_STREAMLINE_COUNT = 9;
-const haloStreamlines = computed(() =>
-  Array.from({ length: HALO_STREAMLINE_COUNT }, (_, i) => {
-    const t = i / (HALO_STREAMLINE_COUNT - 1);
-    const r = 82 + t * 64;
-    return {
-      r,
-      ry: r * 0.92,
-      opacity: 0.55 - t * 0.4,
-      width: 1.5 - t * 0.8,
-      color: mixHex('#fff6dd', '#8a2400', t),
-    };
-  })
-);
 
 // The wide, flat ellipse — the near/far disk seen almost edge-on, crossing straight through the
 // hole. Same hot→cool interpolation as the halo above, just a much flatter aspect ratio.
@@ -216,17 +207,10 @@ async function oidcLogin() {
                 <rect x="0" y="0" width="400" height="400" fill="#fff" />
                 <circle cx="200" cy="200" r="76" fill="#000" />
               </mask>
-              <!-- Both gradients put their brightest ("hot") stop right at the #bh-mask boundary
-                   (~52% for the halo's radial gradient, ~30%/70% for the disk's linear one) rather
-                   than at the shape's own geometric center — the center is exactly what the mask
-                   hides, so a stop placed there would never actually be visible. -->
-              <radialGradient id="bh-halo-grad" cx="50%" cy="50%" r="50%">
-                <stop offset="0%" stop-color="#3a0d00" />
-                <stop offset="48%" stop-color="#3a0d00" />
-                <stop offset="55%" stop-color="#fff6dd" />
-                <stop offset="72%" stop-color="#ff8c00" />
-                <stop offset="100%" stop-color="#3a0d00" />
-              </radialGradient>
+              <!-- The disk gradient puts its brightest ("hot") stop right at the #bh-mask boundary
+                   (~30%/70%) rather than at the shape's own geometric center — the center is
+                   exactly what the mask hides, so a stop placed there would never actually be
+                   visible. -->
               <linearGradient id="bh-disk-grad" x1="0%" y1="0%" x2="100%" y2="0%">
                 <stop offset="0%" stop-color="#3a0d00" />
                 <stop offset="22%" stop-color="#ff8c00" />
@@ -242,24 +226,10 @@ async function oidcLogin() {
               </linearGradient>
             </defs>
 
-            <!-- Rotating plasma: lensed halo (top/bottom arcs) + flat edge-on disk + fine
-                 turbulence streamlines + the asymmetric "Doppler beaming" bright side. -->
+            <!-- Rotating plasma: flat edge-on disk + fine turbulence streamlines + the asymmetric
+                 "Doppler beaming" bright side. -->
             <g class="bh-flow">
-              <ellipse cx="200" cy="200" rx="146" ry="138" fill="url(#bh-halo-grad)" mask="url(#bh-mask)" opacity="0.85" />
               <ellipse cx="200" cy="200" rx="192" ry="34" fill="url(#bh-disk-grad)" mask="url(#bh-mask)" />
-              <ellipse
-                v-for="(l, i) in haloStreamlines"
-                :key="'halo' + i"
-                cx="200"
-                cy="200"
-                :rx="l.r"
-                :ry="l.ry"
-                fill="none"
-                :stroke="l.color"
-                :stroke-width="l.width"
-                :opacity="l.opacity"
-                mask="url(#bh-mask)"
-              />
               <ellipse
                 v-for="(l, i) in diskStreamlines"
                 :key="'disk' + i"

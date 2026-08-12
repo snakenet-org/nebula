@@ -43,11 +43,12 @@ if [ ! -f "$PGDATA/PG_VERSION" ]; then
     --auth-host=scram-sha-256 --auth-local=trust
 fi
 
-# Stop the app + Postgres cleanly on container shutdown (same trap-on-EXIT cleanup pattern as
-# Gravity's scheduler.py entrypoint) — APP_PID is set once uv run main.py starts below; guarded
-# since a signal could in principle arrive before then.
+# Stop the app + rotation daemon + Postgres cleanly on container shutdown (same trap-on-EXIT cleanup
+# pattern as Gravity's scheduler.py entrypoint) — APP_PID/ROTATOR_PID are set once their respective
+# `uv run` commands start below; guarded since a signal could in principle arrive before then.
 shutdown() {
   [ -n "$APP_PID" ] && kill -TERM "$APP_PID" 2>/dev/null && wait "$APP_PID" 2>/dev/null
+  [ -n "$ROTATOR_PID" ] && kill -TERM "$ROTATOR_PID" 2>/dev/null && wait "$ROTATOR_PID" 2>/dev/null
   gosu postgres pg_ctl -D "$PGDATA" -m fast stop
 }
 trap shutdown EXIT INT TERM
@@ -67,6 +68,13 @@ fi
 # no-op. Schema is owned by Alembic (the app does not run create_all on startup).
 echo "Applying database migrations..."
 uv run alembic upgrade head
+
+# The hourly automatic secret-rotation daemon (scripts/rotate_secrets.py) — its own OS process, same
+# "a crash/hang in the loop must never take the API down with it" reasoning as Gravity's own
+# scheduler.py, backgrounded before the app so it's already ticking by the time requests arrive.
+echo "Starting Nebula Vault secret-rotation daemon..."
+uv run scripts/rotate_secrets.py &
+ROTATOR_PID=$!
 
 # Run the API + portal in the BACKGROUND, then `wait` on it — not a plain foreground command, and
 # not exec'd. POSIX sh only delivers a trapped signal once the shell's current foreground command
