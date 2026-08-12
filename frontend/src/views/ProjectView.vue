@@ -103,12 +103,19 @@
     "This key has never been extracted") instead of the native `title` attribute used at first —
     wrapped in a local `TooltipProvider` around just this table, since this view sits outside
     App.vue's sidebar-only one.
+    2026-08-12: the "Edit key" dialog's Name field (`renameValue`) is now a computed get/set wrapping
+    a plain `renameValueRaw` ref, stripping any `\r`/`\n` on every write — a bare `<input>` still
+    accepts a pasted line break into its value even though it never renders one, and
+    nebula.naming.NAME_PATTERN (letters/digits/hyphens/underscores only) already forbids one server-
+    side anyway, so this just keeps the field's actual value honest instead of letting a pasted line
+    break surface as an opaque 422 on Save. The Description Textarea is deliberately untouched — its
+    own multi-line content is intentional, per the 2026-08-09 entry above.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, tooltip, popover, checkbox, alert-dialog, dialog,
     skeleton)
-  @version: 7.3.0
+  @version: 7.3.1
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-09
+  @date: 2026-08-12
 -->
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
@@ -419,7 +426,19 @@ async function deleteKey() {
 // ── Edit key (name + description) ────────────────────────────────────────
 const renameDialogOpen = ref(false);
 const renameTargetKey = ref(null);
-const renameValue = ref('');
+// Key names are charset-restricted server-side (nebula.naming.NAME_PATTERN — letters/digits/
+// hyphens/underscores only, no whitespace at all), so a line break can never legitimately end up
+// in one — but a plain <input> still happily accepts a pasted \n/\r into its value even though it
+// never renders one. Stripping on write (not just on submit) keeps the field's on-screen state and
+// its actual value in sync no matter how a line break got in — typed (impossible via a single Enter
+// press, which submits the form instead) or pasted.
+const renameValueRaw = ref('');
+const renameValue = computed({
+  get: () => renameValueRaw.value,
+  set: (v) => {
+    renameValueRaw.value = v.replace(/[\r\n]+/g, '');
+  },
+});
 const renameDescription = ref('');
 const renamingKey = ref(false);
 function openRenameDialog(key) {
