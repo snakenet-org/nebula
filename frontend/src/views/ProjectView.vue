@@ -110,19 +110,40 @@
     side anyway, so this just keeps the field's actual value honest instead of letting a pasted line
     break surface as an opaque 422 on Save. The Description Textarea is deliberately untouched — its
     own multi-line content is intentional, per the 2026-08-09 entry above.
+    2026-08-12 (later same day, closes GH #2 and #3): (1) the per-row "Set value" editor is now a
+    shared Dialog (valueDialogOpen/editingKey/editingValue), not an inline Popover — same shape as
+    the Edit-key Dialog just above (a single modal at the bottom of the template, its target held in
+    a ref set on open, not derived from the dialog's own open/close transitions). (2) the Sync
+    column header gained its own toggle-all Switch (allSyncEnabled/toggleAllSync) — scoped to
+    `filteredKeys`, the rows actually on screen, same "act on what's visible" scope as the Upload
+    dialog's own select-all Checkbox; reuses `syncingToggle`'s existing disabled-guard with the
+    sentinel string `'all'` instead of a key id, since this can touch more than one row at once. (3)
+    the trailing delete column's header cell, previously empty, now reads "Delete". (4) a new
+    "Download .env" button next to "Upload .env" — the exact inverse of that flow — calls
+    lib/envFile.js's new `formatEnvFile` over every key in the Project (not just the filtered rows,
+    unlike the Sync toggle-all — a downloaded template should be complete) and triggers a browser
+    download of `<project>.env` via a throwaway Blob/object-URL. It never reads a secret's actual
+    plaintext (no revealSecretValue call at all): each line is
+    `KEY=${nebula.<project>.<environment>.KEY}`, the exact cross-project reference syntax
+    nebula-cli's own `deploy` command already resolves (confirmed against that sibling repo's
+    README) — so the file is a stack-file template to fill in externally, not a real secrets export.
+    (5) removed a leftover `uppercase` Tailwind class from the Edit-key dialog's Name input — the
+    2026-08-08 entry above already dropped the same class from the *new-key* Name input as a
+    cosmetic-only fix (nebula.naming's actual charset rule has always allowed mixed case), but missed
+    this second occurrence on the rename/edit form; now neither input forces the displayed text to
+    caps, so a deliberately mixed-case name reads back exactly as typed everywhere it's edited.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
-    textarea, label, select, switch, tabs, table, tooltip, popover, checkbox, alert-dialog, dialog,
-    skeleton)
-  @version: 7.3.1
+    textarea, label, select, switch, tabs, table, tooltip, checkbox, alert-dialog, dialog, skeleton)
+  @version: 7.4.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-12
 -->
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { PhArrowLeft, PhCheck, PhCopy, PhEye, PhEyeSlash, PhGear, PhInfo, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhWarning, PhX } from '@phosphor-icons/vue';
+import { PhArrowLeft, PhCheck, PhCopy, PhDownload, PhEye, PhEyeSlash, PhGear, PhInfo, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhWarning, PhX } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
-import { parseEnvFile } from '../lib/envFile';
+import { formatEnvFile, parseEnvFile } from '../lib/envFile';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -130,7 +151,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
@@ -335,6 +355,22 @@ async function onEnvFileSelected(event) {
   uploadDialogOpen.value = true;
 }
 
+// ── Download .env ────────────────────────────────────────────────────────
+// The inverse of Upload .env — exports every key in the Project (not just the filtered/visible
+// rows; a downloaded stack-file template should be complete), using formatEnvFile (lib/envFile.js).
+// Never touches revealValue/the API — a key's actual value is never read here, only its already-
+// loaded name/description/environment_name, so this needs no canReveal/canEditValue gate at all.
+function downloadEnvFile() {
+  const text = formatEnvFile(project.value.name, keys.value);
+  const blob = new Blob([`${text}\n`], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${project.value.name}.env`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 async function confirmUpload() {
   const selected = uploadItems.value.filter((i) => i.included);
   if (!uploadEnvironmentId.value || !selected.length) return;
@@ -382,6 +418,33 @@ async function toggleSync(key, enabled) {
     const updated = await api.updateSecret(props.projectId, key.id, { sync_enabled: enabled });
     const idx = keys.value.findIndex((k) => k.id === updated.id);
     if (idx !== -1) keys.value[idx] = updated;
+  } catch (e) {
+    toast.error(e.message);
+  } finally {
+    syncingToggle.value = null;
+  }
+}
+
+// The Sync column header's own toggle-all switch — scoped to the currently visible (filtered) rows,
+// same "acts on what's on screen" scope as the Upload dialog's own select-all checkbox. `checked` is
+// on when every visible row is already synced; clicking it flips only the rows that actually differ,
+// reusing `syncingToggle`'s existing "some sync PATCH is in flight" disabled-guard (a sentinel string
+// rather than a key id, since this affects more than one row at once).
+const allSyncEnabled = computed(
+  () => filteredKeys.value.length > 0 && filteredKeys.value.every((k) => k.sync_enabled)
+);
+async function toggleAllSync(enabled) {
+  const targets = filteredKeys.value.filter((k) => k.sync_enabled !== enabled);
+  if (!targets.length) return;
+  syncingToggle.value = 'all';
+  try {
+    const updates = await Promise.all(
+      targets.map((key) => api.updateSecret(props.projectId, key.id, { sync_enabled: enabled }))
+    );
+    for (const updated of updates) {
+      const idx = keys.value.findIndex((k) => k.id === updated.id);
+      if (idx !== -1) keys.value[idx] = updated;
+    }
   } catch (e) {
     toast.error(e.message);
   } finally {
@@ -506,21 +569,27 @@ async function copyValue(key) {
 }
 
 // ── Set value ─────────────────────────────────────────────────────────────
-const editingKeyId = ref(null);
+// A Dialog now, not an inline Popover — same shared-modal shape as the Edit-key dialog below
+// (openRenameDialog/renameTargetKey), so `editingKey` holds the whole row (needed to show its name/
+// environment in the dialog title) rather than just an id.
+const valueDialogOpen = ref(false);
+const editingKey = ref(null);
 const editingValue = ref('');
 const savingValue = ref(false);
 function openEditor(key) {
-  editingKeyId.value = key.id;
+  editingKey.value = key;
   editingValue.value = '';
+  valueDialogOpen.value = true;
 }
 function closeEditor() {
-  editingKeyId.value = null;
+  valueDialogOpen.value = false;
 }
 async function saveValue() {
-  if (!editingKeyId.value) return;
+  const target = editingKey.value;
+  if (!target) return;
   savingValue.value = true;
   try {
-    const updated = await api.setSecretValue(props.projectId, editingKeyId.value, { value: editingValue.value });
+    const updated = await api.setSecretValue(props.projectId, target.id, { value: editingValue.value });
     const idx = keys.value.findIndex((k) => k.id === updated.id);
     if (idx !== -1) keys.value[idx] = updated;
     delete revealed[updated.id];
@@ -598,6 +667,9 @@ async function saveValue() {
           />
           <Button v-if="canEditValue && environments.length" variant="outline" @click="openEnvFilePicker">
             <PhUpload :size="16" weight="bold" /> Upload .env
+          </Button>
+          <Button v-if="environments.length && keys.length" variant="outline" @click="downloadEnvFile">
+            <PhDownload :size="16" weight="bold" /> Download .env
           </Button>
           <Button v-if="canEdit && environments.length" @click="showKeyForm = !showKeyForm">
             <PhPlus :size="16" weight="bold" /> New key
@@ -727,8 +799,20 @@ async function saveValue() {
               <TableHead>Key</TableHead>
               <TableHead>Environment</TableHead>
               <TableHead>Value</TableHead>
-              <TableHead class="w-16">Sync</TableHead>
-              <TableHead class="w-10"></TableHead>
+              <TableHead class="w-20">
+                <div class="flex items-center gap-1.5">
+                  <span>Sync</span>
+                  <Switch
+                    v-if="canEdit"
+                    size="sm"
+                    :model-value="allSyncEnabled"
+                    :disabled="syncingToggle !== null"
+                    title="Toggle sync for every visible key"
+                    @update:model-value="toggleAllSync"
+                  />
+                </div>
+              </TableHead>
+              <TableHead class="w-16 text-right">Delete</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -817,27 +901,15 @@ async function saveValue() {
                     <PhCopy v-else :size="13" weight="bold" />
                   </Button>
 
-                  <Popover
+                  <Button
                     v-if="canEditValue && !key.source_key_id"
-                    :open="editingKeyId === key.id"
-                    @update:open="(v) => !v && closeEditor()"
+                    variant="ghost"
+                    size="icon-xs"
+                    title="Set value"
+                    @click="openEditor(key)"
                   >
-                    <PopoverTrigger as-child>
-                      <Button variant="ghost" size="icon-xs" title="Set value" @click="openEditor(key)">
-                        <PhPencilSimple :size="13" weight="bold" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent v-if="editingKeyId === key.id" class="w-64" @keyup.enter="saveValue">
-                      <div class="space-y-2.5">
-                        <Label :for="`value-${key.id}`">Value for {{ key.environment_name }}</Label>
-                        <Input :id="`value-${key.id}`" v-model="editingValue" placeholder="value" autofocus />
-                        <div class="flex gap-2 justify-end">
-                          <Button variant="outline" size="sm" @click="closeEditor">Cancel</Button>
-                          <Button size="sm" :disabled="savingValue" @click="saveValue">Save</Button>
-                        </div>
-                      </div>
-                    </PopoverContent>
-                  </Popover>
+                    <PhPencilSimple :size="13" weight="bold" />
+                  </Button>
                 </div>
               </TableCell>
               <TableCell class="align-top">
@@ -961,7 +1033,7 @@ async function saveValue() {
         <form @submit.prevent="saveRename" class="space-y-3">
           <div class="space-y-1.5">
             <Label for="rename-key-name">Name</Label>
-            <Input id="rename-key-name" v-model="renameValue" required class="uppercase font-mono" />
+            <Input id="rename-key-name" v-model="renameValue" required class="font-mono" />
           </div>
           <div class="space-y-1.5">
             <Label for="rename-key-description">Description</Label>
@@ -970,6 +1042,25 @@ async function saveValue() {
           <DialogFooter>
             <Button type="button" variant="outline" @click="renameDialogOpen = false">Cancel</Button>
             <Button type="submit" :disabled="renamingKey || !renameValue.trim()">Save</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog :open="valueDialogOpen" @update:open="(v) => (valueDialogOpen = v)">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Set value</DialogTitle>
+          <DialogDescription>{{ editingKey?.name }} — {{ editingKey?.environment_name }}</DialogDescription>
+        </DialogHeader>
+        <form @submit.prevent="saveValue" class="space-y-3">
+          <div class="space-y-1.5">
+            <Label for="edit-value">Value</Label>
+            <Input id="edit-value" v-model="editingValue" placeholder="value" autofocus class="font-mono" />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" @click="valueDialogOpen = false">Cancel</Button>
+            <Button type="submit" :disabled="savingValue">Save</Button>
           </DialogFooter>
         </form>
       </DialogContent>

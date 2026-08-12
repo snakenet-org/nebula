@@ -1,4 +1,4 @@
-// @ai-purpose: Client-side parser for the Project view's "Upload .env" bulk-add flow.
+// @ai-purpose: Client-side parser/formatter for the Project view's .env upload + download flows.
 // @ai-context: Parsing happens entirely client-side, before anything is sent to the bulk-create API
 //   (nebula.secrets.create_keys_bulk) — the backend still independently re-checks for duplicate
 //   names, this module's only job is turning raw file text into name/value pairs. Comments (a line
@@ -8,9 +8,18 @@
 //   remove comment LINES. Every remaining line must match `KEY=VALUE` (optionally `export KEY=VALUE`,
 //   a common shell/.env convention) or the whole file is rejected — parseEnvFile never returns a
 //   partial result, matching the "fail if a single line can't be parsed" requirement.
-// @version: 1.0.0
+//   formatEnvFile (2026-08-12) is the inverse direction, backing "Download .env" — it never exports
+//   an actual secret/variable value (this module has no access to decrypted plaintext anyway; the
+//   caller only ever passes it the already-loaded key list, never a revealed value). Each key
+//   becomes `${nebula.<project>.<environment>.<key>}`, the exact cross-project reference syntax
+//   nebula-cli's own `deploy` command already parses and resolves (confirmed against that sibling
+//   repo's README, not invented fresh here) — so the downloaded file is meant to be committed as a
+//   stack-file template, not filled in with real secrets. Project/Environment/SecretKey names are
+//   all charset-restricted to `[A-Za-z0-9_-]+` (nebula.naming.NAME_PATTERN, enforced server-side),
+//   so none of the three ever needs escaping/quoting when substituted into that marker.
+// @version: 1.1.0
 // @author: Marc Fiedler <marc@snakenet.org>
-// @date: 2026-08-06
+// @date: 2026-08-12
 
 // KEY must look like a shell/env identifier: letters, digits, underscore, not starting with a digit.
 const LINE_RE = /^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/;
@@ -70,4 +79,21 @@ export function parseEnvFile(text) {
   }
 
   return { items, errors };
+}
+
+/**
+ * Builds .env-formatted export text for a Project's keys — the inverse of parseEnvFile. Each key
+ * becomes an optional `# <description>` comment line (omitted when the key has none) followed by
+ * `KEY=${nebula.<project>.<environment>.KEY}`. `projectName` and each `key.environment_name`/
+ * `key.name` are substituted verbatim (see the header comment for why that's always safe).
+ */
+export function formatEnvFile(projectName, keys) {
+  return keys
+    .map((key) => {
+      const lines = [];
+      if (key.description) lines.push(`# ${key.description}`);
+      lines.push(`${key.name}=\${nebula.${projectName}.${key.environment_name}.${key.name}}`);
+      return lines.join('\n');
+    })
+    .join('\n\n');
 }
