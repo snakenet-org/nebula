@@ -33,9 +33,13 @@
   presented access key itself resolves — success and every non-200 response both get a row
   (success=False for the latter), backing the Audit Logs page's "API calls"/"Failed retrievals" tabs
   and the Dashboard's "API requests / day" / "Failed attempts / day" charts (nebula.dashboard —
-  counts across ALL THREE actions, not just vault.retrieve). A wholly invalid/revoked access key
-  (get_access_key's own 401) is NOT logged here — an auth failure, not a request against a resolved
-  Project, with no resolved actor to attribute it to.
+  counts across ALL THREE actions, not just vault.retrieve). Every one of these audit rows also now
+  carries `project_label=resolved_project.name` (2026-08-12) — the resolved Project's name captured
+  at write time, backing the "API calls" tab's Project column alongside `actor_label` (already the
+  access key's own name), so a row is attributable to "which key, from which Project" without
+  parsing `object_label`'s combined "project/environment/key" string. A wholly invalid/revoked
+  access key (get_access_key's own 401) is NOT logged here — an auth failure, not a request against
+  a resolved Project, with no resolved actor to attribute it to.
   GET /status now REQUIRES a project access key too (previously the one route with no access-key
   gate at all — X-Nebula-Token alone was enough). It still returns nothing project-specific
   (`{version, server_time}`) and ignores which Project the key resolves to beyond validating it —
@@ -56,9 +60,9 @@
   - Never log the resolved plaintext value.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 5.1.0
+@version: 5.2.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-09
+@date: 2026-08-12
 """
 
 import uuid
@@ -152,6 +156,7 @@ class VaultRouter(Endpoint):
                 object_id=object_id,
                 object_label=f"{resolved_project.name}/{environment}/{key}",
                 project_id=resolved_project.id,
+                project_label=resolved_project.name,
                 success=success,
                 detail=detail,
             )
@@ -194,6 +199,7 @@ class VaultRouter(Endpoint):
             object_type="project",
             object_label=resolved_project.name,
             project_id=resolved_project.id,
+            project_label=resolved_project.name,
             success=True,
         )
         return VaultStatusResponse(version=version, server_time=datetime.now(timezone.utc))
@@ -215,6 +221,7 @@ class VaultRouter(Endpoint):
             object_type="project",
             object_label=resolved_project.name,
             project_id=resolved_project.id,
+            project_label=resolved_project.name,
             success=True,
         )
         return VaultProjectResponse(

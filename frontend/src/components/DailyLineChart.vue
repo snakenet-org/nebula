@@ -8,16 +8,16 @@
     point, draws a vertical crosshair + highlighted dot, and shows a small tooltip with the exact
     date/value — this is what makes it "read" as more than a static sparkline.
   @dependencies: vue
-  @version: 1.0.0
+  @version: 1.0.1
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-06
+  @date: 2026-08-12
 -->
 <script setup>
 import { computed, ref } from 'vue';
 
 const props = defineProps({
   points: { type: Array, required: true }, // [{ date: 'YYYY-MM-DD', value: Number }]
-  color: { type: String, default: '#6fd0ff' },
+  color: { type: String, default: '#00f0ff' },
 });
 
 const WIDTH = 480;

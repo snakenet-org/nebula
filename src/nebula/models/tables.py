@@ -55,9 +55,9 @@
     chaining) or as its own (backstopped by `ck_secret_keys_reference_not_self`).
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 6.0.0
+@version: 6.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-09
+@date: 2026-08-12
 """
 
 import enum
@@ -347,10 +347,13 @@ class AuditLogEntry(Base):
     object_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     object_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # SET NULL (not CASCADE) — deleting a Project must not erase its audit history, only detach the
-    # live reference; object_label already preserves the project's name as text.
+    # live reference; object_label/project_label already preserve the project's name as text.
     project_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True
     )
+    # The resolved Project's name, captured at write time same as actor_label/object_label —
+    # backs the "API calls" tab's Project column without a live join through project_id.
+    project_label: Mapped[str | None] = mapped_column(String(255), nullable=True)
     success: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)

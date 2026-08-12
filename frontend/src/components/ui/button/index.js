@@ -2,18 +2,33 @@ import { cva } from "class-variance-authority";
 
 export { default as Button } from "./Button.vue";
 
+// Gradient assignment is deliberately tied to a variant's FUNCTION, not decorative: `default` is the
+// one-per-form primary call-to-action, so it gets the boldest two-stop gradient (Starlight Cyan →
+// Flare, the two most saturated baseline colors). `secondary`/`outline` are lower-emphasis
+// actions and get a softer three-stop wash (Solar Gold → Cyan → Flare) as a translucent tint/
+// gradient-bordered outline instead of a solid fill, so they read as secondary next to a `default`
+// button on the same form. `ghost` picks up the same wash only on hover/focus, matching its own
+// "invisible until interacted with" role. `destructive`/`link` stay solid, universal red/primary —
+// see style.css's header comment on why state colors don't get brand gradients.
+// 2026-08-12: swapped the third gradient stop from --magenta to --flare (a saturated space
+// yellow-orange) across every variant below — product ask was for buttons to read cyan/orange, not
+// cyan/magenta. --magenta itself is untouched everywhere else in the app (style.css's --accent,
+// LoginView's ambient scene).
+const OUTLINE_GRADIENT_BG =
+  "[background:linear-gradient(var(--background),var(--background))_padding-box,linear-gradient(135deg,var(--gold),var(--primary)_55%,var(--flare))_border-box]";
+const GHOST_HOVER_WASH =
+  "hover:[background:linear-gradient(135deg,color-mix(in_oklab,var(--gold)_18%,transparent),color-mix(in_oklab,var(--flare)_18%,transparent))]";
+
 export const buttonVariants = cva(
   "focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 rounded-lg border border-transparent bg-clip-padding text-sm font-medium focus-visible:ring-3 aria-invalid:ring-3 active:not-aria-[haspopup]:translate-y-px [&_svg:not([class*=size-])]:size-4 group/button inline-flex shrink-0 items-center justify-center whitespace-nowrap transition-all outline-none select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/80",
-        outline:
-          "border-border bg-background hover:bg-muted hover:text-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 aria-expanded:bg-muted aria-expanded:text-foreground",
-        secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80 aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
-        ghost:
-          "hover:bg-muted hover:text-foreground dark:hover:bg-muted/50 aria-expanded:bg-muted aria-expanded:text-foreground",
+        default:
+          "text-primary-foreground bg-[linear-gradient(135deg,var(--primary),var(--flare))] shadow-[0_0_20px_-6px_var(--primary)] hover:brightness-110 hover:shadow-[0_0_24px_-4px_var(--flare)]",
+        outline: `${OUTLINE_GRADIENT_BG} text-foreground hover:brightness-125 aria-expanded:brightness-125`,
+        secondary: `border-transparent text-secondary-foreground [background:linear-gradient(135deg,color-mix(in_oklab,var(--gold)_16%,var(--secondary)),color-mix(in_oklab,var(--flare)_16%,var(--secondary)))] hover:[background:linear-gradient(135deg,color-mix(in_oklab,var(--gold)_26%,var(--secondary)),color-mix(in_oklab,var(--flare)_26%,var(--secondary)))] aria-expanded:brightness-110`,
+        ghost: `${GHOST_HOVER_WASH} hover:text-foreground aria-expanded:text-foreground aria-expanded:[background:linear-gradient(135deg,color-mix(in_oklab,var(--gold)_18%,transparent),color-mix(in_oklab,var(--flare)_18%,transparent))]`,
         destructive:
           "bg-destructive/10 hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/20 text-destructive focus-visible:border-destructive/40 dark:hover:bg-destructive/30",
         link: "text-primary underline-offset-4 hover:underline",

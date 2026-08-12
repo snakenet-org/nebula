@@ -23,7 +23,7 @@ on:
 jobs:
   build-nebula:
     runs-on: ubuntu-latest
-    environment: Prod
+    environment: prod
     env:
       PUBLISHER: snakeNet
       MODULE: nebula
@@ -68,7 +68,7 @@ jobs:
   deploy:
     needs: build-nebula
     runs-on: ubuntu-latest
-    environment: Prod
+    environment: prod
     steps:
         - run: echo "Deploying Nebula Vault ${{ github.ref_name }}"
 

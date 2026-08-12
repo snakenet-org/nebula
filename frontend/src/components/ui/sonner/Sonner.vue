@@ -18,7 +18,12 @@ const props = defineProps({
   position: { type: String, required: false },
   closeButtonPosition: { type: String, required: false },
   hotkey: { type: Array, required: false },
-  richColors: { type: Boolean, required: false },
+  // Defaults on (not vue-sonner's own default of off) so every toast.success/warning/error call in
+  // the app is colored without every call site having to opt in — see the template's :style block
+  // for the actual green/yellow/red mapping (--success-bg/--warning-bg/--error-bg), keyed off this
+  // app's own --success/--warning/--destructive theme tokens (style.css), not vue-sonner's built-in
+  // light-mode defaults.
+  richColors: { type: Boolean, required: false, default: true },
   expand: { type: Boolean, required: false },
   duration: { type: Number, required: false },
   gap: { type: Number, required: false },
@@ -41,15 +46,27 @@ const delegatedProps = reactiveOmit(props, "class", "toastOptions");
   <Sonner
     :class="cn('toaster group', props.class)"
     :style="{
-      '--normal-bg': 'var(--warning)',
-      '--normal-text': '#000000',
-      '--normal-border': 'var(--warning)',
+      '--normal-bg': 'var(--popover)',
+      '--normal-text': 'var(--popover-foreground)',
+      '--normal-border': 'var(--border)',
+      '--success-bg': 'color-mix(in oklab, var(--success) 20%, var(--popover))',
+      '--success-border': 'color-mix(in oklab, var(--success) 45%, transparent)',
+      '--success-text': 'var(--success)',
+      '--warning-bg': 'color-mix(in oklab, var(--warning) 20%, var(--popover))',
+      '--warning-border': 'color-mix(in oklab, var(--warning) 45%, transparent)',
+      '--warning-text': 'var(--warning)',
+      '--error-bg': 'color-mix(in oklab, var(--destructive) 20%, var(--popover))',
+      '--error-border': 'color-mix(in oklab, var(--destructive) 45%, transparent)',
+      '--error-text': 'var(--destructive)',
+      '--info-bg': 'color-mix(in oklab, var(--info) 20%, var(--popover))',
+      '--info-border': 'color-mix(in oklab, var(--info) 45%, transparent)',
+      '--info-text': 'var(--info)',
       '--border-radius': 'var(--radius)',
       '--gray2': 'hsl(var(--popover) / 0.9)',
       '--gray3': 'var(--border)',
       '--gray4': 'var(--border)',
       '--gray5': 'var(--border)',
-      '--gray12': '#000000',
+      '--gray12': 'var(--popover-foreground)',
     }"
     :toast-options="
       props.toastOptions ?? {

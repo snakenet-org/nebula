@@ -3,14 +3,14 @@
   @ai-context: listProjects() already scopes to what the caller may see (owned + shared, or every
     project for an admin — see nebula.projects.list_projects) so this view does no client-side
     filtering. my_role badge (owner/admin/editor/viewer) is rendered straight from the API response.
-    "New project" is an inline toggled form, not a modal — creating a Project is the lowest-friction
-    action in the app and doesn't need an overlay. Built from shadcn-vue Card/Badge/Button/Input/
-    Label/Skeleton.
+    "New project" is a modal Dialog (2026-08-12 — previously an inline toggled form under the header
+    button; switched for consistency with every other "create" action in the app, which are all
+    modals now). Built from shadcn-vue Card/Badge/Button/Input/Label/Dialog/Skeleton.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input, label,
-    skeleton)
-  @version: 2.1.0
+    dialog, skeleton)
+  @version: 3.0.1
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-06
+  @date: 2026-08-12
 -->
 <script setup>
 import { computed, onMounted, ref } from 'vue';
@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
 import * as api from '../services/api';
 
@@ -28,7 +29,7 @@ const emit = defineEmits(['navigate']);
 
 const projects = ref([]);
 const loading = ref(true);
-const showForm = ref(false);
+const createDialogOpen = ref(false);
 const creating = ref(false);
 const form = ref({ name: '', description: '' });
 
@@ -66,7 +67,7 @@ async function createProject() {
     });
     projects.value.push(project);
     form.value = { name: '', description: '' };
-    showForm.value = false;
+    createDialogOpen.value = false;
     toast.success('Project created.');
     emit('navigate', `/projects/${project.id}`);
   } catch (e) {
@@ -90,32 +91,13 @@ const roleVariant = {
       <div>
         <h1 class="text-2xl font-bold">Projects</h1>
         <p class="text-muted-foreground text-sm mt-1">
-          Credentials, passwords, and environment variables, organized by project.
+          Credentials, passwords, and variables, organized by project.
         </p>
       </div>
-      <Button @click="showForm = !showForm">
+      <Button @click="createDialogOpen = true">
         <PhFolderPlus :size="18" weight="bold" /> New project
       </Button>
     </div>
-
-    <Card v-if="showForm" class="mb-6">
-      <CardContent>
-        <form @submit.prevent="createProject" class="grid sm:grid-cols-2 gap-3">
-          <div class="space-y-1.5">
-            <Label for="new-project-name">Name</Label>
-            <Input id="new-project-name" v-model="form.name" placeholder="Project name" required />
-          </div>
-          <div class="space-y-1.5">
-            <Label for="new-project-description">Description</Label>
-            <Input id="new-project-description" v-model="form.description" placeholder="Description (optional)" />
-          </div>
-          <div class="sm:col-span-2 flex gap-2 justify-end">
-            <Button type="button" variant="outline" @click="showForm = false">Cancel</Button>
-            <Button type="submit" :disabled="creating">Create</Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
 
     <div v-if="loading" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
       <Skeleton v-for="i in 3" :key="i" class="h-32 rounded-xl" />
@@ -163,5 +145,27 @@ const roleVariant = {
         </Card>
       </div>
     </template>
+
+    <Dialog :open="createDialogOpen" @update:open="(v) => (createDialogOpen = v)">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New project</DialogTitle>
+        </DialogHeader>
+        <form @submit.prevent="createProject" class="space-y-3">
+          <div class="space-y-1.5">
+            <Label for="new-project-name">Name</Label>
+            <Input id="new-project-name" v-model="form.name" placeholder="Project name" required />
+          </div>
+          <div class="space-y-1.5">
+            <Label for="new-project-description">Description</Label>
+            <Input id="new-project-description" v-model="form.description" placeholder="Description (optional)" />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" @click="createDialogOpen = false">Cancel</Button>
+            <Button type="submit" :disabled="creating">Create</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>

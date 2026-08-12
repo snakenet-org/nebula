@@ -18,22 +18,36 @@
     collapse/expand toggle IS the Nebula Vault logo button itself (no separate `PhSidebarSimple`
     footer button anymore) — clicking the logo toggles `sidebarExpanded` rather than navigating (Home
     already covers "go to the project list"). About moved out of the scrollable nav list and into the
-    sidebar's own bottom block, directly above Log out — that block's fixed order is now: identity
-    row, About, Log out.
+    sidebar's own bottom block, directly above Log out — that block's fixed order is now:
+    Generate password, identity row, About, Log out (see the second 2026-08-12 entry below for why
+    Generate password sits there and not in the nav list above).
     Toasts render via a single root-level Sonner `<Toaster>` (vue-sonner), top-center — any view
     calls `toast.success()`/`toast.error()` imported directly from 'vue-sonner'.
     2026-08-06: the old top `<header>` bar (just the "Generate password" button) is gone — replaced
-    by a sticky `<footer>` at the bottom of `<main>`: the Generate-password button bottom-left, the
-    running version + "Powered by snakeNet.org" bottom-right (`useConfig().state.version`, forwarded
-    from `GET /api/v1/config`'s new `version` field). Removing the header instead of just relocating
-    the button reclaims a full row of vertical space for the page content above it.
+    by a sticky `<footer>` at the bottom of `<main>`, now just the running version + "Powered by
+    snakeNet.org" (`useConfig().state.version`, forwarded from `GET /api/v1/config`'s new `version`
+    field) — see the 2026-08-12 entry below for where the Generate-password button itself ended up.
     2026-08-12: the "Audit logs" nav entry is no longer admin-only (GitHub #4) — every authenticated
     user can now reach it; the page itself (AuditLogsView.vue) and its backing routes scope what a
     non-admin actually sees to their own owned/editor Projects. Dropped the now-unused `isAdmin`
     computed this required nowhere else in this file.
+    2026-08-12 (same day, follow-up): moved the Generate-password button out of the footer entirely
+    and into the top of the right-hand nav rail (above a `Separator`, ahead of Dashboard/Projects/
+    Environments/Audit logs) — same icon-only-collapsed/icon+text-expanded + Tooltip pattern as every
+    other nav entry, but `variant="default"` instead of `ghost` so its cyan→flare brand gradient
+    (button/index.js, see style.css's same-day color-rebase note) makes it visually pop against the
+    plain nav links below it, per product ask ("make the button colored so it stands out"). The
+    footer's `justify-between` became `justify-end` now that it only has the version/Powered-by span
+    left in it.
+    2026-08-12 (same day, second follow-up): moved the Generate-password button again — out of the
+    top of the nav list and down into the bottom block, directly above the identity row (so it now
+    reads Generate password / avatar+name / About / Log out) — per product ask. Same
+    icon-only-collapsed/icon+text-expanded + Tooltip + `variant="default"` markup, unchanged, just
+    relocated; the nav list's leading `Separator` that used to sit between it and Dashboard moved
+    with it (removed, since the bottom block already has its own separating `Separator` above it).
   @dependencies: vue, @phosphor-icons/vue, vue-sonner, shadcn-vue (button, tooltip, separator,
     avatar, sonner)
-  @version: 5.2.0
+  @version: 5.4.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-12
 -->
@@ -164,11 +178,8 @@ onUnmounted(() => document.removeEventListener('visibilitychange', _handleVisibi
       </div>
       <footer
         v-if="isAuthed"
-        class="sticky bottom-0 z-30 flex items-center justify-between gap-2 px-4 py-2.5 border-t border-border bg-card/70 backdrop-blur-xl backdrop-saturate-150"
+        class="sticky bottom-0 z-30 flex items-center justify-end gap-2 px-4 py-2.5 border-t border-border bg-card/70 backdrop-blur-xl backdrop-saturate-150"
       >
-        <Button variant="outline" size="sm" @click="showPasswordGenerator = true">
-          <PhPassword :size="16" weight="bold" /> Generate password
-        </Button>
         <span class="text-xs text-muted-foreground">
           <template v-if="appConfig.config.version"><span class="text-primary font-medium">v{{ appConfig.config.version }}</span><span class="mx-1.5">|</span></template>Powered by
           <a
@@ -303,6 +314,23 @@ onUnmounted(() => document.removeEventListener('visibilitychange', _handleVisibi
         <Separator />
 
         <div class="flex flex-col gap-1 px-2.5 py-3">
+          <Tooltip v-if="!sidebarExpanded">
+            <TooltipTrigger as-child>
+              <Button variant="default" size="icon" class="w-full" @click="showPasswordGenerator = true">
+                <PhPassword :size="18" weight="bold" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="left">Generate password</TooltipContent>
+          </Tooltip>
+          <Button
+            v-else
+            variant="default"
+            class="w-full justify-start gap-2.5"
+            @click="showPasswordGenerator = true"
+          >
+            <PhPassword :size="18" weight="bold" /> Generate password
+          </Button>
+
           <div class="flex items-center gap-2.5 px-1.5 py-1" :class="sidebarExpanded ? '' : 'justify-center'">
             <Avatar class="size-6">
               <AvatarFallback class="text-[0.65rem]">{{ initials }}</AvatarFallback>

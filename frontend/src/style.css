@@ -1,9 +1,10 @@
 /*
- * @ai-purpose: Global styles — shadcn-vue theme tokens for a dark-glass yellow/light-blue nebula
- *   palette. Nebula Vault is built exclusively from shadcn-vue (https://www.shadcn-vue.com)
- *   components from this session forward — no more hand-rolled `.btn`/`.card`/`.input`/`.pill`
- *   component classes; every visual primitive comes from `src/components/ui/*` (copied in via the
- *   shadcn-vue CLI, then this file's CSS variables) or a Tailwind utility directly.
+ * @ai-purpose: Global styles — shadcn-vue theme tokens for a dark-glass nebula palette built on
+ *   three baseline theme colors: Solar Gold (#FFB703), Cosmic Magenta (#FF007F), and Starlight Cyan
+ *   (#00F0FF). Nebula Vault is built exclusively from shadcn-vue (https://www.shadcn-vue.com)
+ *   components — no more hand-rolled `.btn`/`.card`/`.input`/`.pill` component classes; every visual
+ *   primitive comes from `src/components/ui/*` (copied in via the shadcn-vue CLI, then this file's
+ *   CSS variables) or a Tailwind utility directly.
  * @ai-context: Single fixed dark palette (`<html class="dark">` in index.html, unconditionally — no
  *   theme toggle) whose CSS variable NAMES follow shadcn-vue's own convention exactly
  *   (--background/--foreground/--card/--popover/--primary/--secondary/--muted/--accent/
@@ -12,15 +13,24 @@
  *   makes the "glass" look: `src/components/ui/{card,dialog,alert-dialog,popover,dropdown-menu,
  *   select}/*.vue` each got `backdrop-blur-xl`/`backdrop-blur-2xl` added to their root template
  *   class string after generation (a deliberate, permanent hand-edit to the copied files — shadcn's
- *   whole model is "it's your code now"). Palette: --primary is a light-blue filament glow (the
- *   dominant/interactive color — buttons, links, focus rings, active states), --accent is a warm
- *   gold/yellow glow (shadcn's structural hover/selected-state color across Button ghost/outline,
- *   DropdownMenuItem, SelectItem, etc. — so "yellow" reads as the UI's hover/highlight color
- *   throughout, not just a decorative accent bolted on in one spot). --success/--warning/--info are
- *   NOT part of shadcn's own token set (it only ships --destructive) but this app genuinely needs
- *   4 semantic states for role/status badges (owner/editor/viewer, active/revoked) — mapped into
- *   `@theme inline` as real Tailwind colors (--color-success etc.) so `bg-success/12 text-success
- *   border-success/28` works exactly like any built-in shadcn color, opacity modifier included.
+ *   whole model is "it's your code now").
+ *   **2026-08-12 theme rebase**: --primary is now Starlight Cyan (#00f0ff, the dominant/interactive
+ *   color — buttons, links, focus rings, active states); --accent is now a Cosmic Magenta glow
+ *   (shadcn's structural hover/selected-state color across Button ghost/outline, DropdownMenuItem,
+ *   SelectItem, etc.). Solar Gold doesn't map onto any single shadcn semantic slot — it's kept as a
+ *   standalone `--gold`/`--gold-foreground` pair (below, outside `@theme inline` since nothing needs
+ *   a `bg-gold` utility) purely as the third gradient stop for `components/ui/button`'s
+ *   `buttonVariants` (see that file's own header) and this file's ambient background/login-scene
+ *   gradients — repurposing a *structural* token (e.g. --secondary) for a bright brand color would
+ *   have broken that token's own foreground-contrast assumptions. Per explicit product direction,
+ *   --success/--warning/--destructive/--info stay the universal green/amber/red/sky-blue semantic
+ *   set, deliberately UNCHANGED by the brand-color rebase — they signal state (success/fail/warn),
+ *   not brand, and mixing brand hues into them would make a warning badge and a Solar Gold button
+ *   read as the same signal. --success/--warning/--info are NOT part of shadcn's own token set (it
+ *   only ships --destructive) but this app genuinely needs 4 semantic states for role/status badges
+ *   (owner/editor/viewer, active/revoked) — mapped into `@theme inline` as real Tailwind colors
+ *   (--color-success etc.) so `bg-success/12 text-success border-success/28` works exactly like any
+ *   built-in shadcn color, opacity modifier included.
  *   Site-wide font is Raleway, self-hosted via @fontsource/raleway (weights 300/400/500/600/700,
  *   imported in main.js — replaces the CLI's injected Google Fonts Geist CDN import, which violates
  *   this repo's no-CDN policy) instead of shadcn's own default font. Nav lives in a fixed-height
@@ -29,9 +39,9 @@
  *   template source uses a TS generic, `defineProps<SidebarProps>()`, that the CLI's JS-transform
  *   can't strip — reproduced twice, confirmed not project-specific), so the rail is hand-composed
  *   from primitives instead, still 100% shadcn-vue components.
- * @version: 2.0.1
+ * @version: 3.1.0
  * @author: Marc Fiedler <marc@snakenet.org>
- * @date: 2026-08-06
+ * @date: 2026-08-12
  */
 @import 'tailwindcss';
 @import 'tw-animate-css';
@@ -46,21 +56,39 @@
   --card-foreground: var(--foreground);
   --popover: rgba(12, 17, 27, 0.92);
   --popover-foreground: var(--foreground);
-  --primary: #6fd0ff;
-  --primary-foreground: #04141f;
+  --primary: #00f0ff;
+  --primary-foreground: #001217;
   --secondary: rgba(255, 255, 255, 0.06);
   --secondary-foreground: var(--foreground);
   --muted: rgba(255, 255, 255, 0.05);
   --muted-foreground: #8fa2b8;
-  --accent: rgba(250, 204, 21, 0.14);
-  --accent-foreground: #ffe9a8;
-  --destructive: #fb7185;
-  --success: #34d399;
+  --accent: rgba(255, 0, 127, 0.16);
+  --accent-foreground: #ff9dc9;
+  /* Solar Gold + full-strength Cosmic Magenta — two baseline brand colors that don't map onto any
+     single shadcn semantic slot (--primary already claimed Starlight Cyan; repurposing --secondary
+     for a bright brand hue would break that token's own foreground-contrast assumptions). Both live
+     here as their own pairs, used by this file's ambient glows/login-scene backdrop. --accent above
+     is the translucent, structural-hover-tint version of the same magenta.
+     **2026-08-12, same-day follow-up**: button/index.js's gradients no longer use --magenta at all
+     (product ask: buttons should read cyan/orange, not cyan/magenta) — they now use --flare, a
+     third brand color (a saturated "space" yellow-orange, distinct from --gold's more muted amber)
+     added purely for that purpose. --magenta itself is untouched everywhere else (--accent,
+     LoginView's ambient wisps/scene) — only the button gradients moved off it.
+   */
+  --gold: #ffb703;
+  --gold-foreground: #2b1c00;
+  --magenta: #ff007f;
+  --magenta-foreground: #2b0018;
+  --flare: #ff8c00;
+  --flare-foreground: #2b1300;
+  /* Universal state colors — deliberately untouched by the brand rebase above, see header comment. */
+  --destructive: #f43f5e;
+  --success: #22c55e;
   --warning: #fbbf24;
-  --info: #7dd3fc;
+  --info: #38bdf8;
   --border: rgba(255, 255, 255, 0.09);
   --input: rgba(255, 255, 255, 0.11);
-  --ring: rgba(111, 208, 255, 0.55);
+  --ring: rgba(0, 240, 255, 0.55);
   --radius: 0.85rem;
 }
 
@@ -80,6 +108,12 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
+  --color-gold: var(--gold);
+  --color-gold-foreground: var(--gold-foreground);
+  --color-magenta: var(--magenta);
+  --color-magenta-foreground: var(--magenta-foreground);
+  --color-flare: var(--flare);
+  --color-flare-foreground: var(--flare-foreground);
   --color-destructive: var(--destructive);
   --color-success: var(--success);
   --color-warning: var(--warning);
@@ -112,8 +146,9 @@ body,
 body {
   margin: 0;
   background-image:
-    radial-gradient(ellipse 90% 55% at 20% -5%, rgba(111, 208, 255, 0.09), transparent),
-    radial-gradient(ellipse 60% 45% at 92% 92%, rgba(250, 204, 21, 0.07), transparent);
+    radial-gradient(ellipse 90% 55% at 20% -5%, rgba(0, 240, 255, 0.09), transparent),
+    radial-gradient(ellipse 55% 40% at 100% 40%, rgba(255, 0, 127, 0.06), transparent),
+    radial-gradient(ellipse 60% 45% at 92% 92%, rgba(255, 183, 3, 0.06), transparent);
   font-weight: 300;
   -webkit-font-smoothing: antialiased;
 }

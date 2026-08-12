@@ -27,9 +27,13 @@
     characters with a trailing "…" (`truncate()` below) — the full text is still available via the
     cell's `title` attribute on hover, and editing a long description is unaffected (openEdit loads
     the untruncated `env.description` into the edit dialog).
+    2026-08-12 (later same day, modals): "New environment" is now a modal Dialog (createDialogOpen)
+    instead of an inline toggled Card next to the header button — same shape as the pre-existing Edit
+    dialog just below it in this file, so create/edit are now visually consistent instead of one being
+    inline and the other a modal.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, badge, button,
     input, label, dialog, alert-dialog, skeleton)
-  @version: 2.0.0
+  @version: 2.1.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-12
 -->
@@ -72,7 +76,7 @@ onMounted(load);
 // Name/description are wrapped in computed get/set pairs that strip any pasted \r/\n on every
 // write (see lib/utils.stripLineBreaks) — name's charset was already line-break-free server-side
 // (nebula.naming), but description had no such restriction until GitHub #6.
-const showForm = ref(false);
+const createDialogOpen = ref(false);
 const creating = ref(false);
 const form = ref({ name: '', description: '' });
 const formName = computed({
@@ -94,7 +98,7 @@ async function createEnvironment() {
     environments.value.push(env);
     environments.value.sort((a, b) => a.name.localeCompare(b.name));
     form.value = { name: '', description: '' };
-    showForm.value = false;
+    createDialogOpen.value = false;
     toast.success('Environment created.');
   } catch (e) {
     toast.error(e.message);
@@ -163,29 +167,10 @@ async function deleteEnvironment() {
           to exactly one.
         </p>
       </div>
-      <Button @click="showForm = !showForm">
+      <Button @click="createDialogOpen = true">
         <PhPlus :size="18" weight="bold" /> New environment
       </Button>
     </div>
-
-    <Card v-if="showForm" class="mb-6">
-      <CardContent>
-        <form @submit.prevent="createEnvironment" class="grid sm:grid-cols-2 gap-3">
-          <div class="space-y-1.5">
-            <Label for="new-env-name">Name</Label>
-            <Input id="new-env-name" v-model="formName" placeholder="e.g. production" required />
-          </div>
-          <div class="space-y-1.5">
-            <Label for="new-env-description">Description</Label>
-            <Input id="new-env-description" v-model="formDescription" placeholder="Description (optional)" />
-          </div>
-          <div class="sm:col-span-2 flex gap-2 justify-end">
-            <Button type="button" variant="outline" @click="showForm = false">Cancel</Button>
-            <Button type="submit" :disabled="creating">Create</Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
 
     <div v-if="loading" class="space-y-3">
       <Skeleton class="h-12 rounded-xl" v-for="i in 3" :key="i" />
@@ -232,6 +217,28 @@ async function deleteEnvironment() {
         </TableBody>
       </Table>
     </Card>
+
+    <Dialog :open="createDialogOpen" @update:open="(v) => (createDialogOpen = v)">
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>New environment</DialogTitle>
+        </DialogHeader>
+        <form @submit.prevent="createEnvironment" class="space-y-3">
+          <div class="space-y-1.5">
+            <Label for="new-env-name">Name</Label>
+            <Input id="new-env-name" v-model="formName" placeholder="e.g. production" required />
+          </div>
+          <div class="space-y-1.5">
+            <Label for="new-env-description">Description</Label>
+            <Input id="new-env-description" v-model="formDescription" placeholder="Description (optional)" />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" @click="createDialogOpen = false">Cancel</Button>
+            <Button type="submit" :disabled="creating">Create</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
 
     <Dialog :open="!!editing" @update:open="(v) => !v && (editing = null)">
       <DialogContent>

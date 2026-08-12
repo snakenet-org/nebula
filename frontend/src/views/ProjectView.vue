@@ -21,7 +21,7 @@
     then a shadcn-vue Dialog lets the user pick a target Environment and review the parsed keys
     row-by-row — each row gets its own "import this key" Checkbox (default checked; unchecked rows
     are simply left out of the POST body, no dedicated skip field needed) and its own Type Select
-    (secret/environment variable, default secret), not one Type for the whole batch — before
+    (secret/variable, default secret), not one Type for the whole batch — before
     POSTing the included rows at once to /secret/{project_id}/bulk (api.bulkCreateSecrets) — always
     creates brand-new keys, never updates an existing one; the backend 409s (naming every conflict)
     rather than silently overwriting anything.
@@ -51,7 +51,7 @@
     browser.
     2026-08-08: added a quick copy-to-clipboard button (PhCopy/PhCheck swap, same 1500ms-then-revert
     pattern as ProjectSettingsView's access-token copy button) next to each value in the table.
-    Environment variables copy their already-in-hand `key.value` with no API call; a secret copies
+    Variables copy their already-in-hand `key.value` with no API call; a secret copies
     its already-`revealed` plaintext if the row is currently expanded, otherwise fetches it fresh via
     the same `revealSecretValue` call/`canReveal` gate the Eye button uses — deliberately without
     populating `revealed`, so a "quick copy" never forces the plaintext to also render on screen. Also
@@ -137,18 +137,36 @@
     the full text is still available via the element's `title` attribute on hover, and the Edit-key
     dialog's Description Textarea is unaffected (openRenameDialog loads the untruncated
     `key.description`), so a long description is never actually lost, only shortened in the table.
+    2026-08-12 (later same day, modals): "New key" is now a modal Dialog (showKeyForm doubles as its
+    open state) instead of an inline Card under the header actions — same consistency pass as
+    HomeView.vue/EnvironmentsView.vue's create forms. While in there: the "Set value" tab's Value
+    field label dropped its "(optional)" suffix (the field is still genuinely optional — a blank
+    value creates the key exactly as before — but the label no longer says so, per the product ask)
+    and gained a small "Generate" button (PhArrowsClockwise) at the input's trailing edge that fills
+    it with a fresh 35-character `generateSecurePassword` (lib/generators.js, already used identically
+    by PasswordGeneratorDialog.vue's header button — Web Crypto rejection-sampling, never
+    Math.random) — purely a convenience fill, the field stays freely editable afterward.
+    2026-08-12 (later same day, naming pass): dropped the "environment" qualifier from every
+    user-facing/comment reference to the non-secret variable_type — "Environment variable(s)"/"env
+    var" all now just read "Variable(s)"/"var" (the type Select's own `<option>` VALUE stays the
+    literal `"environment"` string, unchanged — that's the API's variable_type enum, not display
+    text). Matches DashboardView.vue's stat tile, which already read "Variables". "Environment" on
+    its own (the global dev/staging/prod entity, e.g. the per-row Environment Select/filter) is
+    untouched — only the compound phrase "environment variable" was in scope.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, tooltip, checkbox, alert-dialog, dialog, skeleton)
-  @version: 7.5.0
+  @version: 8.1.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-12
 -->
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { PhArrowLeft, PhCheck, PhCopy, PhDownload, PhEye, PhEyeSlash, PhGear, PhInfo, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhWarning, PhX } from '@phosphor-icons/vue';
+import { PhArrowLeft, PhArrowsClockwise, PhCheck, PhCopy, PhDownload, PhEye, PhEyeSlash, PhGear, PhInfo, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhWarning, PhX } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
+import { useConfig } from '../composables/useConfig';
 import { formatEnvFile, parseEnvFile } from '../lib/envFile';
+import { generateSecurePassword } from '../lib/generators';
 import { truncate } from '../lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -168,6 +186,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 
 const props = defineProps({ projectId: { type: String, required: true } });
 const emit = defineEmits(['navigate']);
+
+const { state: appConfig } = useConfig();
 
 const project = ref(null);
 const environments = ref([]);
@@ -282,6 +302,13 @@ function resetNewKeyForm() {
   referenceSourceKeys.value = [];
 }
 
+// A convenience fill for the "Set value" tab's Value field — 35 characters, same Web-Crypto
+// rejection-sampled generator PasswordGeneratorDialog.vue's header button already uses. Purely
+// fills the field; it stays freely editable afterward, same as typing a value by hand.
+function generateNewKeyValue() {
+  newKey.value.value = generateSecurePassword(35);
+}
+
 async function addKey() {
   if (!newKey.value.name.trim() || !newKey.value.environment_id) return;
   if (newKeyValueMode.value === 'reference' && !referenceSourceKeyId.value) {
@@ -367,7 +394,7 @@ async function onEnvFileSelected(event) {
 // Never touches revealValue/the API — a key's actual value is never read here, only its already-
 // loaded name/description/environment_name, so this needs no canReveal/canEditValue gate at all.
 function downloadEnvFile() {
-  const text = formatEnvFile(project.value.name, keys.value);
+  const text = formatEnvFile(project.value.name, keys.value, appConfig.config.version);
   const blob = new Blob([`${text}\n`], { type: 'text/plain' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -553,7 +580,7 @@ async function toggleReveal(key) {
 }
 
 // ── Copy value ────────────────────────────────────────────────────────────
-// Environment variables are never anonymized, so their value is already in hand. A secret whose
+// Variables are never anonymized, so their value is already in hand. A secret whose
 // value hasn't been revealed yet is fetched on demand (same revealSecretValue call the Eye button
 // uses, same canReveal gate below) and copied straight to the clipboard without populating
 // `revealed` — a "quick copy" shouldn't force the plaintext to also appear on screen.
@@ -677,119 +704,11 @@ async function saveValue() {
           <Button v-if="environments.length && keys.length" variant="outline" @click="downloadEnvFile">
             <PhDownload :size="16" weight="bold" /> Download .env
           </Button>
-          <Button v-if="canEdit && environments.length" @click="showKeyForm = !showKeyForm">
+          <Button v-if="canEdit && environments.length" @click="showKeyForm = true">
             <PhPlus :size="16" weight="bold" /> New key
           </Button>
         </div>
       </div>
-
-      <Card v-if="showKeyForm" class="mb-4">
-        <CardContent>
-          <form @submit.prevent="addKey" class="space-y-4">
-            <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              <div class="space-y-1.5">
-                <Label for="new-key-name">Name</Label>
-                <Input id="new-key-name" v-model="newKey.name" placeholder="KEY_NAME" required />
-              </div>
-              <div class="space-y-1.5">
-                <Label for="new-key-description">Description</Label>
-                <Input id="new-key-description" v-model="newKey.description" placeholder="Description (optional)" />
-              </div>
-              <div class="space-y-1.5">
-                <Label for="new-key-env">Environment</Label>
-                <Select v-model="newKey.environment_id">
-                  <SelectTrigger id="new-key-env" class="w-full"><SelectValue placeholder="Choose one" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div v-if="!canEditValue" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              <div class="space-y-1.5">
-                <Label for="new-key-type">Type</Label>
-                <Select v-model="newKey.variable_type">
-                  <SelectTrigger id="new-key-type" class="w-full"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="secret">Secret</SelectItem>
-                    <SelectItem value="environment">Environment variable</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <p class="sm:col-span-2 text-muted-foreground text-xs self-end">
-                You can create the key now; an owner or admin will need to set its value.
-              </p>
-            </div>
-
-            <Tabs v-else v-model="newKeyValueMode">
-              <TabsList class="w-full max-w-md">
-                <TabsTrigger value="direct" class="flex-1">Set value</TabsTrigger>
-                <TabsTrigger value="reference" class="flex-1">Reference a secret</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="direct" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-3">
-                <div class="space-y-1.5">
-                  <Label for="new-key-type">Type</Label>
-                  <Select v-model="newKey.variable_type">
-                    <SelectTrigger id="new-key-type" class="w-full"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="secret">Secret</SelectItem>
-                      <SelectItem value="environment">Environment variable</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div class="sm:col-span-2 space-y-1.5">
-                  <Label for="new-key-value">Value (optional)</Label>
-                  <Input id="new-key-value" v-model="newKey.value" placeholder="Leave blank to set a value later" class="font-mono" />
-                </div>
-              </TabsContent>
-
-              <TabsContent value="reference" class="space-y-3 pt-3">
-                <div class="grid sm:grid-cols-2 gap-3">
-                  <div class="space-y-1.5">
-                    <Label>Project</Label>
-                    <Select v-model="referenceSourceProjectId">
-                      <SelectTrigger class="w-full"><SelectValue placeholder="Select a project…" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem v-for="p in referenceSourceProjects" :key="p.id" :value="p.id">{{ p.name }}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p v-if="!loadingReferenceSourceProjects && !referenceSourceProjects.length" class="text-muted-foreground text-xs">
-                      You need reveal access on another project to reference one of its secrets.
-                    </p>
-                  </div>
-                  <div class="space-y-1.5">
-                    <Label>Secret</Label>
-                    <Select v-model="referenceSourceKeyId" :disabled="!referenceSourceProjectId || loadingReferenceSourceKeys">
-                      <SelectTrigger class="w-full"><SelectValue placeholder="Select a secret…" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem v-for="k in referenceSourceKeys" :key="k.id" :value="k.id">{{ k.name }}</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <p
-                      v-if="referenceSourceProjectId && !loadingReferenceSourceKeys && !referenceSourceKeys.length"
-                      class="text-muted-foreground text-xs"
-                    >
-                      That project has no keys to reference yet.
-                    </p>
-                  </div>
-                </div>
-                <p class="text-muted-foreground text-xs">
-                  This key will always mirror the referenced secret's current type and value — it can
-                  only be changed in its source project, but it can still be renamed, reassigned to a
-                  different environment here, and synced to GitHub like any other key.
-                </p>
-              </TabsContent>
-            </Tabs>
-
-            <div class="flex gap-2 justify-end">
-              <Button type="button" variant="outline" @click="showKeyForm = false">Cancel</Button>
-              <Button type="submit" :disabled="savingKey || !newKey.environment_id">Create</Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
 
       <Card v-if="!filteredKeys.length">
         <CardContent class="p-10 text-center text-muted-foreground text-sm">
@@ -841,7 +760,7 @@ async function saveValue() {
                   </Tooltip>
                   <span class="font-mono font-semibold">{{ key.name }}</span>
                   <Badge :variant="key.variable_type === 'secret' ? 'warning' : 'info'" class="text-[0.65rem] px-1.5 py-0">
-                    {{ key.variable_type === 'secret' ? 'secret' : 'env var' }}
+                    {{ key.variable_type === 'secret' ? 'secret' : 'var' }}
                   </Badge>
                   <Badge v-if="key.source_key_id" variant="accent" class="text-[0.65rem] px-1.5 py-0">
                     <PhLink :size="10" weight="bold" /> reference
@@ -882,7 +801,7 @@ async function saveValue() {
               <TableCell class="align-top">
                 <div class="flex items-center gap-2">
                   <span v-if="!key.is_set" class="text-muted-foreground text-xs">—</span>
-                  <!-- Environment variables are never anonymized — the value ships in the list response itself. -->
+                  <!-- Variables are never anonymized — the value ships in the list response itself. -->
                   <span v-else-if="key.variable_type === 'environment'" class="font-mono">{{ key.value }}</span>
                   <span v-else-if="revealed[key.id] !== undefined" class="font-mono">{{ revealed[key.id] }}</span>
                   <span v-else class="secret-mask">••••••••</span>
@@ -944,6 +863,132 @@ async function saveValue() {
       </Card>
     </template>
 
+    <Dialog :open="showKeyForm" @update:open="(v) => (showKeyForm = v)">
+      <DialogContent class="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>New key</DialogTitle>
+        </DialogHeader>
+        <form @submit.prevent="addKey" class="space-y-4">
+          <div class="grid sm:grid-cols-2 gap-3">
+            <div class="space-y-1.5">
+              <Label for="new-key-name">Name</Label>
+              <Input id="new-key-name" v-model="newKey.name" placeholder="KEY_NAME" required />
+            </div>
+            <div class="space-y-1.5">
+              <Label for="new-key-env">Environment</Label>
+              <Select v-model="newKey.environment_id">
+                <SelectTrigger id="new-key-env" class="w-full"><SelectValue placeholder="Choose one" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div class="sm:col-span-2 space-y-1.5">
+              <Label for="new-key-description">Description</Label>
+              <Input id="new-key-description" v-model="newKey.description" placeholder="Description (optional)" />
+            </div>
+          </div>
+
+          <div v-if="!canEditValue" class="grid sm:grid-cols-2 gap-3">
+            <div class="space-y-1.5">
+              <Label for="new-key-type">Type</Label>
+              <Select v-model="newKey.variable_type">
+                <SelectTrigger id="new-key-type" class="w-full"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="secret">Secret</SelectItem>
+                  <SelectItem value="environment">Variable</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <p class="sm:col-span-2 text-muted-foreground text-xs self-end">
+              You can create the key now; an owner or admin will need to set its value.
+            </p>
+          </div>
+
+          <Tabs v-else v-model="newKeyValueMode">
+            <TabsList class="w-full">
+              <TabsTrigger value="direct" class="flex-1">Set value</TabsTrigger>
+              <TabsTrigger value="reference" class="flex-1">Reference a secret</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="direct" class="grid sm:grid-cols-2 gap-3 pt-3">
+              <div class="space-y-1.5">
+                <Label for="new-key-type">Type</Label>
+                <Select v-model="newKey.variable_type">
+                  <SelectTrigger id="new-key-type" class="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="secret">Secret</SelectItem>
+                    <SelectItem value="environment">Variable</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div class="space-y-1.5">
+                <Label for="new-key-value">Value</Label>
+                <div class="relative">
+                  <Input
+                    id="new-key-value"
+                    v-model="newKey.value"
+                    placeholder="Leave blank to set a value later"
+                    class="font-mono pr-8"
+                  />
+                  <button
+                    type="button"
+                    title="Generate a 35-character secure password"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    @click="generateNewKeyValue"
+                  >
+                    <PhArrowsClockwise :size="14" weight="bold" />
+                  </button>
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="reference" class="space-y-3 pt-3">
+              <div class="grid sm:grid-cols-2 gap-3">
+                <div class="space-y-1.5">
+                  <Label>Project</Label>
+                  <Select v-model="referenceSourceProjectId">
+                    <SelectTrigger class="w-full"><SelectValue placeholder="Select a project…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem v-for="p in referenceSourceProjects" :key="p.id" :value="p.id">{{ p.name }}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p v-if="!loadingReferenceSourceProjects && !referenceSourceProjects.length" class="text-muted-foreground text-xs">
+                    You need reveal access on another project to reference one of its secrets.
+                  </p>
+                </div>
+                <div class="space-y-1.5">
+                  <Label>Secret</Label>
+                  <Select v-model="referenceSourceKeyId" :disabled="!referenceSourceProjectId || loadingReferenceSourceKeys">
+                    <SelectTrigger class="w-full"><SelectValue placeholder="Select a secret…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem v-for="k in referenceSourceKeys" :key="k.id" :value="k.id">{{ k.name }}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p
+                    v-if="referenceSourceProjectId && !loadingReferenceSourceKeys && !referenceSourceKeys.length"
+                    class="text-muted-foreground text-xs"
+                  >
+                    That project has no keys to reference yet.
+                  </p>
+                </div>
+              </div>
+              <p class="text-muted-foreground text-xs">
+                This key will always mirror the referenced secret's current type and value — it can
+                only be changed in its source project, but it can still be renamed, reassigned to a
+                different environment here, and synced to GitHub like any other key.
+              </p>
+            </TabsContent>
+          </Tabs>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" @click="showKeyForm = false">Cancel</Button>
+            <Button type="submit" :disabled="savingKey || !newKey.environment_id">Create</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+
     <Dialog :open="uploadDialogOpen" @update:open="(v) => !v && (uploadDialogOpen = false)">
       <DialogContent class="sm:max-w-2xl">
         <DialogHeader>
@@ -994,7 +1039,7 @@ async function saveValue() {
                       <SelectTrigger size="sm" class="w-full"><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="secret">Secret</SelectItem>
-                        <SelectItem value="environment">Environment variable</SelectItem>
+                        <SelectItem value="environment">Variable</SelectItem>
                       </SelectContent>
                     </Select>
                   </TableCell>

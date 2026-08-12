@@ -8,7 +8,11 @@
 //   prevents concurrent refresh races when multiple in-flight requests all 401 at the same time.
 //   Mirrors Satellite's services/api.js request/parseResponse shape, with thin per-route helpers
 //   for projects/environments/secrets/access keys.
-// @version: 2.4.1
+//   2026-08-12 (later same day): listAuditActivity/listAuditApiCalls/listAuditFailedRetrievals now
+//   take an optional { search, page, pageSize } and build a query string (auditQuery) — the Audit
+//   Logs page pages server-side now (300 rows/page max, nebula.audit.MAX_PAGE_SIZE) instead of
+//   pulling the whole log in one response.
+// @version: 2.5.0
 // @author: Marc Fiedler <marc@snakenet.org>
 // @date: 2026-08-12
 import { useAuth } from '../composables/useAuth';
@@ -145,9 +149,17 @@ export const getDashboardSummary = () => request('GET', '/api/v1/dashboard/summa
 export const getDashboardSeries = () => request('GET', '/api/v1/dashboard/series');
 
 // ── Audit logs (server-side scoped: admin sees everything, others their own/editor Projects) ──
-export const listAuditActivity = () => request('GET', '/api/v1/audit/activity');
-export const listAuditApiCalls = () => request('GET', '/api/v1/audit/api-calls');
-export const listAuditFailedRetrievals = () => request('GET', '/api/v1/audit/failed-retrievals');
+// Each returns an AuditLogPageResponse ({ items, total, page, page_size }) — page_size is capped
+// server-side at nebula.audit.MAX_PAGE_SIZE (300), enforced again here so a caller can't request more.
+function auditQuery({ search, page = 1, pageSize = 300 } = {}) {
+  const params = new URLSearchParams({ page: String(page), page_size: String(Math.min(pageSize, 300)) });
+  if (search) params.set('search', search);
+  return `?${params.toString()}`;
+}
+export const listAuditActivity = (opts) => request('GET', `/api/v1/audit/activity${auditQuery(opts)}`);
+export const listAuditApiCalls = (opts) => request('GET', `/api/v1/audit/api-calls${auditQuery(opts)}`);
+export const listAuditFailedRetrievals = (opts) =>
+  request('GET', `/api/v1/audit/failed-retrievals${auditQuery(opts)}`);
 
 // ── Health ───────────────────────────────────────────────────────────────
 export const getHealth = () => request('GET', '/api/v1/health/');

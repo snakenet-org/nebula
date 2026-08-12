@@ -16,8 +16,11 @@
     page's "Failed retrievals" tab lists row-by-row). Every authenticated user sees this page;
     project browsing moved to its own /projects route (HomeView.vue, unchanged) now that / is the
     Dashboard.
+    2026-08-12 (theme rebase): the three chart line colors were recolored from the old light-blue/
+    gold/rose palette to the new baseline brand colors (Starlight Cyan/Solar Gold) and the universal
+    destructive red, matching style.css's rebased tokens — cosmetic only, no data/scoping change.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, skeleton)
-  @version: 1.2.0
+  @version: 1.2.1
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-12
 -->
@@ -99,13 +102,13 @@ const cards = computed(() => [
         <Card>
           <CardContent>
             <h2 class="font-semibold text-sm mb-3">API requests / day</h2>
-            <DailyLineChart :points="apiPoints" color="#6fd0ff" />
+            <DailyLineChart :points="apiPoints" color="#00f0ff" />
           </CardContent>
         </Card>
         <Card>
           <CardContent>
             <h2 class="font-semibold text-sm mb-3">Secrets extracted via frontend / day</h2>
-            <DailyLineChart :points="frontendPoints" color="#fbbf24" />
+            <DailyLineChart :points="frontendPoints" color="#ffb703" />
           </CardContent>
         </Card>
         <Card>
@@ -113,7 +116,7 @@ const cards = computed(() => [
             <h2 class="font-semibold text-sm mb-3 flex items-center gap-1.5">
               <PhWarning :size="14" weight="bold" class="text-destructive" /> Failed attempts / day
             </h2>
-            <DailyLineChart :points="failedPoints" color="#fb7185" />
+            <DailyLineChart :points="failedPoints" color="#f43f5e" />
           </CardContent>
         </Card>
       </div>

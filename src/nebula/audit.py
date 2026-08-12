@@ -42,11 +42,26 @@
   (...)` also naturally drops rows with no project at all (global Environment CRUD, auth.login/
   logout/refresh) for a non-admin — intentional, since those aren't "audit logs of a project they
   own or edit."
+  2026-08-12 (later same day): list_activity/list_api_calls/list_failed_retrievals now page
+  (`page`/`page_size`, capped at MAX_PAGE_SIZE=300 — the Audit Logs page's own hard cap, enforced
+  again here as a safety net even though api/v1/audit.py's own Query(le=300) already rejects a
+  larger request) and accept an optional `search` string, returned alongside `total` as a
+  `(items, total)` tuple rather than a bare list — the log can run to thousands of rows and no
+  caller needs (or should be handed) all of them in one response. `search` is a plain
+  case-insensitive substring match (`ILIKE %term%`) OR'd across whichever of actor_label/action/
+  object_label/project_label a row carries — deliberately not a stored `tsvector`+GIN-index column:
+  action strings are short, dot-separated tokens ("vault.retrieve") that Postgres's default text
+  search parser doesn't reliably split on a plain substring query, and this table has no volume yet
+  that a `LIMIT`-bounded ILIKE scan can't handle. `record_access_key_action` (and now `record`
+  itself) also carry a new `project_label` — the resolved Project's name captured at write time,
+  same "never re-joined later" reasoning as actor_label/object_label (see
+  models.tables.AuditLogEntry.project_label) — backing the "API calls" tab's new Project column
+  without a live join through the loose (SET NULL) `project_id` reference.
 @ai-rules:
   - Never put a plaintext secret value in `detail` or any other column.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 1.3.0
+@version: 1.4.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-12
 """
@@ -56,10 +71,22 @@ from collections.abc import Sequence
 from datetime import date, datetime, timedelta
 
 from fastapi import Request
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nebula.models.tables import ActorType, AuditLogEntry, UserAccount
+
+# The Audit Logs page's hard per-page cap — re-enforced here, not just at the API/Query layer.
+MAX_PAGE_SIZE = 300
+
+# Columns a free-text `search` term is OR'd across — see the module docstring for why this is a
+# plain ILIKE match rather than a stored tsvector column.
+_SEARCHABLE_COLUMNS = (
+    AuditLogEntry.actor_label,
+    AuditLogEntry.action,
+    AuditLogEntry.object_label,
+    AuditLogEntry.project_label,
+)
 
 # Every api/v1/vault.py route's action string — see the module docstring above.
 VAULT_ACTIONS: tuple[str, ...] = ("vault.retrieve", "vault.project", "vault.status")
@@ -83,6 +110,7 @@ async def record(
     object_id: uuid.UUID | None = None,
     object_label: str | None = None,
     project_id: uuid.UUID | None = None,
+    project_label: str | None = None,
     success: bool = True,
     detail: str | None = None,
     ip_address: str | None = None,
@@ -96,6 +124,7 @@ async def record(
         object_id=object_id,
         object_label=object_label,
         project_id=project_id,
+        project_label=project_label,
         success=success,
         detail=detail,
         ip_address=ip_address,
@@ -146,6 +175,7 @@ async def record_access_key_action(
     object_id: uuid.UUID | None = None,
     object_label: str | None = None,
     project_id: uuid.UUID | None = None,
+    project_label: str | None = None,
     success: bool,
     detail: str | None = None,
 ) -> AuditLogEntry:
@@ -160,73 +190,123 @@ async def record_access_key_action(
         object_id=object_id,
         object_label=object_label,
         project_id=project_id,
+        project_label=project_label,
         success=success,
         detail=detail,
         ip_address=_client_ip(request),
     )
 
 
+def _search_condition(search: str | None) -> ColumnElement[bool] | None:
+    """OR's a case-insensitive substring match for `search` across _SEARCHABLE_COLUMNS, or None
+    (no-op) when `search` is empty/blank — see the module docstring for why this is ILIKE, not a
+    stored tsvector column."""
+    term = search.strip() if search else ""
+    if not term:
+        return None
+    pattern = f"%{term}%"
+    return or_(*(column.ilike(pattern) for column in _SEARCHABLE_COLUMNS))
+
+
+async def _paginate(
+    session: AsyncSession,
+    conditions: list[ColumnElement[bool]],
+    *,
+    page: int,
+    page_size: int,
+) -> tuple[list[AuditLogEntry], int]:
+    """Shared offset/limit pagination for list_activity/list_api_calls/list_failed_retrievals —
+    returns (this page's rows newest-first, total matching row count)."""
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
+
+    total = (
+        await session.execute(select(func.count()).select_from(AuditLogEntry).where(*conditions))
+    ).scalar_one()
+    result = await session.execute(
+        select(AuditLogEntry)
+        .where(*conditions)
+        .order_by(AuditLogEntry.occurred_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    return list(result.scalars().all()), total
+
+
 async def list_activity(
-    session: AsyncSession, *, limit: int = 200, project_ids: Sequence[uuid.UUID] | None = None
-) -> list[AuditLogEntry]:
-    """Human (ActorType.USER) actions, newest first — the Audit Logs page's "Activity" tab.
+    session: AsyncSession,
+    *,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = MAX_PAGE_SIZE,
+    project_ids: Sequence[uuid.UUID] | None = None,
+) -> tuple[list[AuditLogEntry], int]:
+    """Human (ActorType.USER) actions, newest first, paged — the Audit Logs page's "Activity" tab.
+    Returns (this page's rows, total matching row count).
 
     `project_ids=None` (admin) returns every row app-wide. A non-None sequence (a non-admin's
     owned+editor Projects, see nebula.projects.list_editable_project_ids) scopes to only rows whose
     `project_id` is in that set — this also naturally excludes actions with no project at all (global
     Environment CRUD, auth.login/logout/refresh), which is intentional: a non-admin sees audit logs
-    OF THEIR PROJECTS, not the whole app's activity.
+    OF THEIR PROJECTS, not the whole app's activity. `search`, when given, OR's a substring match
+    across actor_label/action/object_label/project_label (see _search_condition).
     """
-    conditions = [AuditLogEntry.actor_type == ActorType.USER]
+    conditions: list[ColumnElement[bool]] = [AuditLogEntry.actor_type == ActorType.USER]
     if project_ids is not None:
         conditions.append(AuditLogEntry.project_id.in_(project_ids))
-    result = await session.execute(
-        select(AuditLogEntry)
-        .where(*conditions)
-        .order_by(AuditLogEntry.occurred_at.desc())
-        .limit(limit)
-    )
-    return list(result.scalars().all())
+    search_condition = _search_condition(search)
+    if search_condition is not None:
+        conditions.append(search_condition)
+    return await _paginate(session, conditions, page=page, page_size=page_size)
 
 
 async def list_api_calls(
-    session: AsyncSession, *, limit: int = 200, project_ids: Sequence[uuid.UUID] | None = None
-) -> list[AuditLogEntry]:
-    """Access-key (ActorType.ACCESS_KEY) calls, newest first — the "API calls" tab.
+    session: AsyncSession,
+    *,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = MAX_PAGE_SIZE,
+    project_ids: Sequence[uuid.UUID] | None = None,
+) -> tuple[list[AuditLogEntry], int]:
+    """Access-key (ActorType.ACCESS_KEY) calls, newest first, paged — the "API calls" tab.
+    Returns (this page's rows, total matching row count).
 
-    See list_activity's docstring for what `project_ids=None` vs. a scoped sequence means — every
-    vault.py call already carries a project_id (it's always dispatched against one Project's access
-    key), so scoping here never drops a row for a spurious "no project" reason.
+    See list_activity's docstring for what `project_ids=None`/`search` mean — every vault.py call
+    already carries a project_id (it's always dispatched against one Project's access key), so
+    scoping here never drops a row for a spurious "no project" reason.
     """
-    conditions = [AuditLogEntry.actor_type == ActorType.ACCESS_KEY]
+    conditions: list[ColumnElement[bool]] = [AuditLogEntry.actor_type == ActorType.ACCESS_KEY]
     if project_ids is not None:
         conditions.append(AuditLogEntry.project_id.in_(project_ids))
-    result = await session.execute(
-        select(AuditLogEntry)
-        .where(*conditions)
-        .order_by(AuditLogEntry.occurred_at.desc())
-        .limit(limit)
-    )
-    return list(result.scalars().all())
+    search_condition = _search_condition(search)
+    if search_condition is not None:
+        conditions.append(search_condition)
+    return await _paginate(session, conditions, page=page, page_size=page_size)
 
 
 async def list_failed_retrievals(
-    session: AsyncSession, *, limit: int = 200, project_ids: Sequence[uuid.UUID] | None = None
-) -> list[AuditLogEntry]:
-    """Failed calls to any api/v1/vault.py route, newest first — the "Failed retrievals" tab.
+    session: AsyncSession,
+    *,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = MAX_PAGE_SIZE,
+    project_ids: Sequence[uuid.UUID] | None = None,
+) -> tuple[list[AuditLogEntry], int]:
+    """Failed calls to any api/v1/vault.py route, newest first, paged — the "Failed retrievals" tab.
+    Returns (this page's rows, total matching row count).
 
-    See list_activity's docstring for what `project_ids=None` vs. a scoped sequence means.
+    See list_activity's docstring for what `project_ids=None`/`search` mean.
     """
-    conditions = [AuditLogEntry.action.in_(VAULT_ACTIONS), AuditLogEntry.success.is_(False)]
+    conditions: list[ColumnElement[bool]] = [
+        AuditLogEntry.action.in_(VAULT_ACTIONS),
+        AuditLogEntry.success.is_(False),
+    ]
     if project_ids is not None:
         conditions.append(AuditLogEntry.project_id.in_(project_ids))
-    result = await session.execute(
-        select(AuditLogEntry)
-        .where(*conditions)
-        .order_by(AuditLogEntry.occurred_at.desc())
-        .limit(limit)
-    )
-    return list(result.scalars().all())
+    search_condition = _search_condition(search)
+    if search_condition is not None:
+        conditions.append(search_condition)
+    return await _paginate(session, conditions, page=page, page_size=page_size)
 
 
 async def daily_counts(
