@@ -31,6 +31,12 @@ export const buttonVariants = cva(
         ghost: `${GHOST_HOVER_WASH} hover:text-foreground aria-expanded:text-foreground aria-expanded:[background:linear-gradient(135deg,color-mix(in_oklab,var(--gold)_18%,transparent),color-mix(in_oklab,var(--flare)_18%,transparent))]`,
         destructive:
           "bg-destructive/10 hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/20 text-destructive focus-visible:border-destructive/40 dark:hover:bg-destructive/30",
+        // Same shape as `destructive`, --warning instead of --destructive — added 2026-08-13 for
+        // System Settings' "orange" danger zones (import/export vault), a real but less catastrophic
+        // action than a delete. Mirrors badge/index.js's own pre-existing "warning" variant, which
+        // uses this exact bg/10 + hover/20 + text shape already.
+        warning:
+          "bg-warning/10 hover:bg-warning/20 focus-visible:ring-warning/20 dark:focus-visible:ring-warning/40 dark:bg-warning/20 text-warning focus-visible:border-warning/40 dark:hover:bg-warning/30",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

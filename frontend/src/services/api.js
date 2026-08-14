@@ -16,9 +16,13 @@
 //   clipboard copy in ProjectView.vue; createSecret/setSecretValue's payloads may now also carry an
 //   optional rotation_frequency/rotation_unit (nebula.rotation), unchanged shape here since both
 //   already just forward whatever payload object they're given.
-// @version: 2.6.0
+//   2026-08-13: new resetSystemData/resetSystemLogs/exportVault/importVault — the four System
+//   Settings danger zones (api/v1/system.py), all admin-only (backend-enforced; a 403 surfaces as
+//   this request()'s usual thrown Error). importVault's payload is exactly the shape exportVault
+//   returns, so a downloaded export can be re-uploaded verbatim.
+// @version: 2.7.0
 // @author: Marc Fiedler <marc@snakenet.org>
-// @date: 2026-08-12
+// @date: 2026-08-13
 import { useAuth } from '../composables/useAuth';
 
 let _refreshPromise = null;
@@ -167,6 +171,12 @@ export const listAuditActivity = (opts) => request('GET', `/api/v1/audit/activit
 export const listAuditApiCalls = (opts) => request('GET', `/api/v1/audit/api-calls${auditQuery(opts)}`);
 export const listAuditFailedRetrievals = (opts) =>
   request('GET', `/api/v1/audit/failed-retrievals${auditQuery(opts)}`);
+
+// ── System Settings (admin-only danger zones) ───────────────────────────────
+export const resetSystemData = () => request('POST', '/api/v1/system/reset-data');
+export const resetSystemLogs = () => request('POST', '/api/v1/system/reset-logs');
+export const exportVault = () => request('GET', '/api/v1/system/export');
+export const importVault = (payload) => request('POST', '/api/v1/system/import', payload);
 
 // ── Health ───────────────────────────────────────────────────────────────
 export const getHealth = () => request('GET', '/api/v1/health/');

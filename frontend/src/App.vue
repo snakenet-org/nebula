@@ -45,15 +45,21 @@
     icon-only-collapsed/icon+text-expanded + Tooltip + `variant="default"` markup, unchanged, just
     relocated; the nav list's leading `Separator` that used to sit between it and Dashboard moved
     with it (removed, since the bottom block already has its own separating `Separator` above it).
+    2026-08-13: added a "System Settings" nav entry (route `/system-settings` → new
+    SystemSettingsView.vue) at the bottom of the scrollable nav list, below Audit logs — the
+    `isAdmin` computed dropped in the 2026-08-12 Audit-logs-opened-up entry above is back, this time
+    actually admin-only (`v-if="isAdmin"` around the whole entry, both collapsed/expanded variants),
+    since System Settings' four danger zones (reset all data, reset logs, import/export vault — see
+    that view's own header) are the one page in this app that stays admin-only end to end.
   @dependencies: vue, @phosphor-icons/vue, vue-sonner, shadcn-vue (button, tooltip, separator,
     avatar, sonner)
-  @version: 5.4.0
+  @version: 5.5.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-12
+  @date: 2026-08-13
 -->
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { PhFolders, PhGauge, PhInfo, PhPassword, PhScroll, PhStack, PhSignOut } from '@phosphor-icons/vue';
+import { PhFolders, PhGauge, PhGearSix, PhInfo, PhPassword, PhScroll, PhStack, PhSignOut } from '@phosphor-icons/vue';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -72,6 +78,7 @@ import ProjectView from './views/ProjectView.vue';
 import ProjectSettingsView from './views/ProjectSettingsView.vue';
 import EnvironmentsView from './views/EnvironmentsView.vue';
 import AuditLogsView from './views/AuditLogsView.vue';
+import SystemSettingsView from './views/SystemSettingsView.vue';
 import AboutView from './views/AboutView.vue';
 
 const showPasswordGenerator = ref(false);
@@ -102,6 +109,7 @@ async function navigate(to) {
 }
 
 const isAuthed = computed(() => !!auth.session);
+const isAdmin = computed(() => !!auth.session?.user?.isAdmin);
 
 watch(isAuthed, (authed, wasAuthed) => {
   if (!authed || wasAuthed) return;
@@ -123,6 +131,7 @@ const currentView = computed(() => {
   if (path.value.startsWith('/projects')) return HomeView;
   if (path.value.startsWith('/environments')) return EnvironmentsView;
   if (path.value.startsWith('/audit-logs')) return AuditLogsView;
+  if (path.value.startsWith('/system-settings')) return SystemSettingsView;
   if (path.value.startsWith('/about')) return AboutView;
   return DashboardView;
 });
@@ -309,6 +318,32 @@ onUnmounted(() => document.removeEventListener('visibilitychange', _handleVisibi
           >
             <PhScroll :size="18" weight="bold" /> Audit logs
           </Button>
+
+          <template v-if="isAdmin">
+            <Tooltip v-if="!sidebarExpanded">
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="w-full"
+                  :class="path.startsWith('/system-settings') ? 'bg-accent text-accent-foreground' : ''"
+                  @click="navigate('/system-settings')"
+                >
+                  <PhGearSix :size="18" weight="bold" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">System Settings</TooltipContent>
+            </Tooltip>
+            <Button
+              v-else
+              variant="ghost"
+              class="w-full justify-start gap-2.5"
+              :class="path.startsWith('/system-settings') ? 'bg-accent text-accent-foreground' : ''"
+              @click="navigate('/system-settings')"
+            >
+              <PhGearSix :size="18" weight="bold" /> System Settings
+            </Button>
+          </template>
         </nav>
 
         <Separator />
