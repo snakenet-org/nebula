@@ -5,10 +5,12 @@
   Environment link; list_keys/get_key responses carry PRESENCE ONLY (is_set), never ciphertext.
   Since 2026-08-09 (later same day), setting/changing what a value IS (set_value, an initial value
   or source_key_id at create_key time, every row of bulk_create_keys) requires can_edit_value
-  (owner/admin only); reassigning environment_id/name/description/sync_enabled/deleting a key still
-  only needs can_edit (owner/admin/shared EDITOR); revealing a value requires can_reveal (owner/
-  admin/shared EDITOR — see nebula.projects' module docstring for the full split: a shared EDITOR
-  can now read/copy a value but never write a new one). bulk_create_keys backs the Project view's
+  (owner/admin/shared EDITOR, widened from owner/admin-only on 2026-08-17); reassigning
+  environment_id/name/description/sync_enabled/deleting a key still only needs can_edit (owner/
+  admin/shared EDITOR); revealing a value requires can_reveal (owner/admin/ANY shared role, widened
+  to also cover a shared VIEWER on 2026-08-17 — see nebula.projects' module docstring for the full
+  split: a shared VIEWER or EDITOR can both read/copy a value, only an EDITOR can also write a new
+  one). bulk_create_keys backs the Project view's
   "Upload .env" button — gated by can_edit_value (every row sets a value), always creates brand-new
   keys (409s naming every conflict rather than updating an existing key); one Environment applies to
   the whole batch, but `variable_type` is per-item (SecretBulkItem) so the review dialog can pick
@@ -71,6 +73,9 @@
   value in the request/response at all) for the frontend's copy-to-clipboard button, gated the same
   as actually being allowed to hold that plaintext (can_reveal for a SECRET, mere project visibility
   for a VARIABLE, matching ProjectView.vue's copy-button v-if).
+  2026-08-17: can_edit_value's signature widened to also take the caller's `share` row (create_key/
+  bulk_create_keys/set_value all pass it through now) — see nebula.projects' module docstring for the
+  full permission-matrix rework this session.
 @ai-rules:
   - Never include SecretKey.ciphertext or a decrypted value in any response except reveal_value's.
   - A GitHub sync failure triggered by _auto_sync_github must never surface as an error response for
@@ -80,9 +85,9 @@
     existence/no-chaining checks as a substitute for that permission check.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 6.0.0
+@version: 6.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-12
+@date: 2026-08-17
 """
 
 import uuid
@@ -313,7 +318,7 @@ class SecretRouter(Endpoint):
         if not projects_service.can_edit(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot edit this project")
         if (payload.value or payload.source_key_id is not None) and not projects_service.can_edit_value(
-            actor, project
+            actor, project, share
         ):
             raise HTTPException(status_code=403, detail="You cannot set a value in this project")
         await self._environment_or_404(session, payload.environment_id)
@@ -370,8 +375,8 @@ class SecretRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> list[SecretKeyResponse]:
-        project, _share = await self._project_or_404(session, actor, project_id)
-        if not projects_service.can_edit_value(actor, project):
+        project, share = await self._project_or_404(session, actor, project_id)
+        if not projects_service.can_edit_value(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot set values in this project")
         await self._environment_or_404(session, payload.environment_id)
         if not payload.items:
@@ -485,8 +490,8 @@ class SecretRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> SecretKeyResponse:
-        project, _share = await self._project_or_404(session, actor, project_id)
-        if not projects_service.can_edit_value(actor, project):
+        project, share = await self._project_or_404(session, actor, project_id)
+        if not projects_service.can_edit_value(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot set values in this project")
         key = await self._key_or_404(session, project_id, key_id)
         try:

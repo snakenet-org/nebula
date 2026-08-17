@@ -7,11 +7,11 @@
 # @ai-tools: ruff (linting/formatting)
 # ==============================================================================
 #   Author: Marc Fiedler <marc@snakenet.org>
-#   Date: 2026-08-13
+#   Date: 2026-08-17
 
 [project]
 name = "nebula"
-version = "2.21.0"
+version = "2.22.0"
 description = "Nebula Vault, a self-hosted secrets manager for snakeNet.org"
 readme = "README.md"
 license = {text = "Apache Software License 2.0"}

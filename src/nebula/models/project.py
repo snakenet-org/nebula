@@ -2,11 +2,14 @@
 """
 @ai-purpose: Pydantic request/response models for api/v1/project.py.
 @ai-context: ProjectResponse.my_role tells the frontend which actions to show without it having to
-  re-derive permissions client-side — "owner"/"admin" (full access), "editor" (can rename/delete/
-  reassign-environment/toggle-sync a key and reveal+copy its current value, but — since 2026-08-09,
-  later same day — can no longer set/change what a value IS; not sharing/access-keys/delete either),
-  "viewer" (read-only, masked values only) — see nebula.projects for the actual can_view/can_edit/
-  can_reveal/can_edit_value/... logic this is computed from. Since the 2026-08-06
+  re-derive permissions client-side — "owner"/"admin" (full access, including delete/transfer),
+  "editor" (since 2026-08-17: everything a viewer can do, PLUS can rename/delete/reassign-
+  environment/toggle-sync a key, set/change a key's value, and manage project settings — sharing,
+  API access keys, GitHub sync config — but still cannot delete or transfer the Project itself),
+  "viewer" (since 2026-08-17: can view the project and reveal+copy a secret/variable's value, but
+  cannot edit anything or see/change project settings) — see nebula.projects for the actual
+  can_view/can_edit/can_reveal/can_edit_value/can_manage_sharing/can_manage_access_keys/
+  can_manage_github/... logic this is computed from. Since the 2026-08-06
   multi-repo GitHub sync redesign, a Project's GitHub config is no longer embedded in ProjectResponse
   (it was a single repo_url/connected pair before) — it's now a separate list of
   ProjectGithubSyncResponse rows, fetched the same way shares/access-keys already are (see
@@ -29,9 +32,11 @@
   Since 2026-08-09, ProjectTransferRequest backs the danger-zone "transfer ownership" action
   (api/v1/project.py's POST /{project_id}/transfer) — just the target username, mirroring
   ProjectShareCreateRequest's shape.
-@version: 4.2.0
+  2026-08-17: MyRole's doc comment above rewritten for the permission-matrix rework (see
+  nebula.projects' module docstring) — the Literal values themselves are unchanged.
+@version: 4.3.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-09
+@date: 2026-08-17
 """
 
 import uuid

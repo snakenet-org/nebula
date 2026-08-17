@@ -1,13 +1,15 @@
 #    (c) snakenet.org, All rights reserved
 """
 @ai-purpose: ProjectAccessKey CRUD — thin wrapper over nebula.access_keys.
-@ai-context: Owner+admin only (can_manage_access_keys) for every route — an access key is a
+@ai-context: Owner/admin/shared-EDITOR only (can_manage_access_keys, widened from owner+admin-only
+  on 2026-08-17 — matches can_manage_sharing/can_manage_github's own widening, an EDITOR can now
+  manage this project's settings, access keys included) for every route — an access key is a
   standing credential that can read every secret in the Project (see api/v1/vault.py), so managing
-  it sits at the same trust tier as sharing/reveal/delete, not can_edit. AccessKeyCreateResponse.
+  it sits at the same trust tier as sharing/GitHub-sync-config, not can_edit. AccessKeyCreateResponse.
   token is present ONLY on the create response — list/get never return it again.
-@version: 1.1.0
+@version: 1.2.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-08-17
 """
 
 import uuid
@@ -55,8 +57,8 @@ class AccessKeyRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> list[AccessKeyResponse]:
-        project, _share = await self._project_or_404(session, actor, project_id)
-        if not projects_service.can_manage_access_keys(actor, project):
+        project, share = await self._project_or_404(session, actor, project_id)
+        if not projects_service.can_manage_access_keys(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot manage this project's access keys")
         rows = await access_keys_service.list_access_keys(session, project_id)
         return [AccessKeyResponse.model_validate(row, from_attributes=True) for row in rows]
@@ -69,8 +71,8 @@ class AccessKeyRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> AccessKeyCreateResponse:
-        project, _share = await self._project_or_404(session, actor, project_id)
-        if not projects_service.can_manage_access_keys(actor, project):
+        project, share = await self._project_or_404(session, actor, project_id)
+        if not projects_service.can_manage_access_keys(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot manage this project's access keys")
         row, token = await access_keys_service.generate_access_key(
             session, project_id, name=payload.name, created_by=actor.id
@@ -99,8 +101,8 @@ class AccessKeyRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> None:
-        project, _share = await self._project_or_404(session, actor, project_id)
-        if not projects_service.can_manage_access_keys(actor, project):
+        project, share = await self._project_or_404(session, actor, project_id)
+        if not projects_service.can_manage_access_keys(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot manage this project's access keys")
         try:
             row = await access_keys_service.get_access_key(session, project_id, access_key_id)

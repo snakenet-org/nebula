@@ -1,8 +1,11 @@
 <!--
   @ai-purpose: Project settings — rename/description, sharing (Viewer/Editor roles), REST API access
-    keys, GitHub sync targets, and the danger-zone delete. Owner+admin only — the backend enforces
-    this independently on every call (can_manage_sharing/can_manage_access_keys/can_manage_github/
-    can_delete), this view only hides controls.
+    keys, GitHub sync targets, and the danger-zone transfer/delete. Since 2026-08-17, a shared EDITOR
+    can reach and manage everything on this page EXCEPT the danger zone (transfer ownership/delete),
+    which stays owner/admin only (`canDeleteOrTransfer`, separate from the page-level `canManage`
+    gate) — the backend enforces this independently on every call (can_manage_sharing/
+    can_manage_access_keys/can_manage_github/can_transfer_ownership/can_delete), this view only hides
+    controls.
   @ai-context: A newly created access key's raw token is shown exactly once, right after creation
     (createdToken), in a copyable box with an explicit "you won't see this again" warning — mirrors
     the one-time-reveal convention every sibling app uses for API tokens (Gravity/Singularity's M2M
@@ -55,11 +58,19 @@
     nothing can null it out from under the dialog's own close machinery. Redirects to /projects on
     success, same as deleteProject, since a non-admin owner loses can_view on the Project the moment
     ownership moves away.
+    2026-08-17: permission-matrix rework per an explicit product spec restating the whole access
+    model (see nebula.projects' module docstring). `canManage` (page access + Details/Sharing/API
+    keys/GitHub sync cards) widened from owner/admin to owner/admin/editor; a new `canDeleteOrTransfer`
+    (owner/admin only, unchanged tier) now separately gates just the Danger zone card, since an
+    EDITOR can reach Settings but still cannot transfer or delete the Project. `loadAll`'s
+    shares/access-keys/GitHub-targets fetch condition widened to match `canManage`. The PAT-reference
+    source-project picker filter (`ensurePatSourceProjectsLoaded`) widened from owner/admin/editor to
+    every visible role, matching can_reveal's own widening to cover a shared VIEWER.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, select, badge,
     alert-dialog, dialog, switch, tabs, input, label, button, skeleton, separator)
-  @version: 4.6.0
+  @version: 5.0.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-09
+  @date: 2026-08-17
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
@@ -89,13 +100,16 @@ const accessKeys = ref([]);
 const githubTargets = ref([]);
 const loading = ref(true);
 
-const canManage = computed(() => ['owner', 'admin'].includes(project.value?.my_role));
+// Since 2026-08-17: a shared EDITOR can also reach and manage Settings (sharing, access keys,
+// GitHub sync config) — only Delete/Transfer stay owner/admin-only, gated separately below.
+const canManage = computed(() => ['owner', 'admin', 'editor'].includes(project.value?.my_role));
+const canDeleteOrTransfer = computed(() => ['owner', 'admin'].includes(project.value?.my_role));
 
 async function loadAll() {
   loading.value = true;
   try {
     project.value = await api.getProject(props.projectId);
-    if (['owner', 'admin'].includes(project.value.my_role)) {
+    if (['owner', 'admin', 'editor'].includes(project.value.my_role)) {
       [shares.value, accessKeys.value, githubTargets.value] = await Promise.all([
         api.listShares(props.projectId),
         api.listAccessKeys(props.projectId),
@@ -273,10 +287,10 @@ async function ensurePatSourceProjectsLoaded() {
   loadingPatSourceProjects.value = true;
   try {
     const all = await api.listProjects();
-    // Only projects the caller can REVEAL (owner/admin/shared editor) — the backend independently
-    // re-enforces this via can_reveal, this filter just keeps the picker from ever offering an
-    // option the API would reject.
-    patSourceProjects.value = all.filter((p) => ['owner', 'admin', 'editor'].includes(p.my_role));
+    // Only projects the caller can REVEAL — since 2026-08-17, can_reveal covers ANY visible role
+    // (owner/admin/editor/viewer), so every Project listProjects() returns already qualifies; the
+    // backend independently re-enforces this via can_reveal regardless.
+    patSourceProjects.value = all.filter((p) => !!p.my_role);
   } catch (e) {
     toast.error(e.message);
   } finally {
@@ -674,7 +688,7 @@ async function transferProject() {
         </CardContent>
       </Card>
 
-      <Card class="border-destructive/30">
+      <Card v-if="canDeleteOrTransfer" class="border-destructive/30">
         <CardContent>
           <h2 class="font-semibold mb-2 text-destructive">Danger zone</h2>
 

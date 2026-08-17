@@ -8,10 +8,11 @@
   can_edit/can_manage_sharing/can_delete before calling into nebula.projects — a 403 (not 404) once
   the caller has already proven they can at least view the Project, so "you can see it but not edit
   it" reads as a distinct, honest error from "this doesn't exist." Share-list/manage routes are
-  owner+admin only (can_manage_sharing) — a shared viewer/editor cannot see who else the Project is
-  shared with, kept deliberately conservative pending an actual UX need to loosen that. GitHub sync
+  owner/admin/shared-EDITOR (can_manage_sharing, widened from owner+admin-only on 2026-08-17 — a
+  shared EDITOR can now see and manage who else the Project is shared with, matching their new
+  "can change project settings" role) — a shared VIEWER still cannot. GitHub sync
   target routes (/github/targets*) are the multi-repo redesign's CRUD surface — same can_manage_github
-  (owner/admin) gate as before, now per-target instead of per-project singular config; /github/sync
+  (owner/admin/shared EDITOR, also widened 2026-08-17) gate as before, now per-target instead of per-project singular config; /github/sync
   fans out to every enabled target (nebula.github_sync.sync_all_for_project) — the same fan-out
   api/v1/secret.py's mutating routes now call automatically after every value change.
   Since 2026-08-08, create_github_target/update_github_target accept a `pat_source_key_id`
@@ -43,10 +44,15 @@
   2026-08-09 (later same day): `_to_response`'s my_role computation is unchanged (still "editor" for
   any ProjectShare.role == EDITOR) — only what "editor" now MEANS shifted, see nebula.projects'
   module docstring and models/project.py's MyRole doc comment.
+  2026-08-17: can_manage_sharing/can_manage_github both gained a `share` parameter and now also
+  accept a shared EDITOR (every call site here threads the caller's own `share` row through instead
+  of discarding it as `_share`) — see nebula.projects' module docstring for the full permission-
+  matrix rework this session. `_to_response`'s my_role computation and can_delete/
+  can_transfer_ownership are unchanged.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 4.2.0
+@version: 5.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-09
+@date: 2026-08-17
 """
 
 import uuid
@@ -355,8 +361,8 @@ class ProjectRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> list[ProjectShareResponse]:
-        project, _share = await self._get_or_404(session, actor, project_id)
-        if not projects_service.can_manage_sharing(actor, project):
+        project, share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_sharing(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot view this project's sharing")
         rows = await projects_service.list_shares(session, project_id)
         out = []
@@ -381,8 +387,8 @@ class ProjectRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> ProjectShareResponse:
-        project, _share = await self._get_or_404(session, actor, project_id)
-        if not projects_service.can_manage_sharing(actor, project):
+        project, caller_share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_sharing(actor, project, caller_share):
             raise HTTPException(status_code=403, detail="You cannot manage this project's sharing")
         try:
             share = await projects_service.share_project(
@@ -415,8 +421,8 @@ class ProjectRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> ProjectShareResponse:
-        project, _share = await self._get_or_404(session, actor, project_id)
-        if not projects_service.can_manage_sharing(actor, project):
+        project, share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_sharing(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot manage this project's sharing")
         target_share = await projects_service.get_share(session, project_id, user_id)
         if target_share is None:
@@ -445,8 +451,8 @@ class ProjectRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> None:
-        project, _share = await self._get_or_404(session, actor, project_id)
-        if not projects_service.can_manage_sharing(actor, project):
+        project, share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_sharing(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot manage this project's sharing")
         target_share = await projects_service.get_share(session, project_id, user_id)
         if target_share is None:
@@ -498,8 +504,8 @@ class ProjectRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> list[ProjectGithubSyncTargetResponse]:
-        project, _share = await self._get_or_404(session, actor, project_id)
-        if not projects_service.can_manage_github(actor, project):
+        project, share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_github(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
         targets = await github_sync_service.list_sync_targets(session, project_id)
         return [await _to_target_response(session, actor, t) for t in targets]
@@ -512,8 +518,8 @@ class ProjectRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> ProjectGithubSyncTargetResponse:
-        project, _share = await self._get_or_404(session, actor, project_id)
-        if not projects_service.can_manage_github(actor, project):
+        project, share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_github(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
         pat_source_key_id = None
         if payload.pat_source_key_id is not None:
@@ -548,8 +554,8 @@ class ProjectRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> ProjectGithubSyncTargetResponse:
-        project, _share = await self._get_or_404(session, actor, project_id)
-        if not projects_service.can_manage_github(actor, project):
+        project, share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_github(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
         target = await self._github_target_or_404(session, project_id, target_id)
         pat_source_key_id = None
@@ -585,8 +591,8 @@ class ProjectRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> None:
-        project, _share = await self._get_or_404(session, actor, project_id)
-        if not projects_service.can_manage_github(actor, project):
+        project, share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_github(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
         target = await self._github_target_or_404(session, project_id, target_id)
         target_id_copy, target_label = target.id, github_sync_service.target_display_name(target)
@@ -605,8 +611,8 @@ class ProjectRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> ProjectGithubSyncResultResponse:
-        project, _share = await self._get_or_404(session, actor, project_id)
-        if not projects_service.can_manage_github(actor, project):
+        project, share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_github(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
         target = await self._github_target_or_404(session, project_id, target_id)
         try:
@@ -646,8 +652,8 @@ class ProjectRouter(Endpoint):
         actor: UserAccount = Depends(get_current_user),
         session: AsyncSession = Depends(get_session),
     ) -> list[ProjectGithubSyncResultResponse]:
-        project, _share = await self._get_or_404(session, actor, project_id)
-        if not projects_service.can_manage_github(actor, project):
+        project, share = await self._get_or_404(session, actor, project_id)
+        if not projects_service.can_manage_github(actor, project, share):
             raise HTTPException(status_code=403, detail="You cannot manage this project's GitHub sync")
         results = await github_sync_service.sync_all_for_project(session, project_id)
         for result in results:

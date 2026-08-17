@@ -1,16 +1,27 @@
 #   (c) snakeNet.org, All rights reserved
 #       Nebula Vault: self-hosted secrets manager
 #
-# Build+push, then auto-deploy via Satellite — mirrors apps/satellite/.github/workflows/build.yml's
-# own two-job shape (see that file's `deploy` job comment for the full reasoning on why this is a
-# separate `needs: build-nebula` job rather than inline steps at the end of the build job: Satellite
-# is the very service that PERFORMS every app's deploy trigger, so redeploying Nebula Vault from
-# inside the still-running build job that produced its new image would mean that job asks the
-# service it depends on to restart itself before the job has actually finished — a fresh `needs:`
-# job only starts once build-nebula has fully completed and exited cleanly). Single image only
-# (unlike Satellite, which also deploys its separate satellite-link reporter) — Nebula Vault has just
-# the one Dockerfile/image. `snakenet-org/gravity-push` (the deploy push-notification step) is left
-# out, same as before this job existed — no push_topic_id has been set up for this app yet.
+# Build+push, then auto-deploy via Satellite, then notify Pulsar — mirrors apps/gravity and
+# apps/singularity's own three-job build.yml shape exactly (see gravity's `deploy` job comment for
+# the full reasoning on why `deploy` is its own `needs: build-nebula` job rather than inline steps at
+# the end of the build job: Satellite is the very service that PERFORMS every app's deploy trigger,
+# so redeploying Nebula Vault from inside the still-running build job that produced its new image
+# would mean that job asks the service it depends on to restart itself before the job has actually
+# finished — a fresh `needs:` job only starts once build-nebula has fully completed and exited
+# cleanly). Single image only (unlike Satellite, which also deploys its separate satellite-link
+# reporter) — Nebula Vault has just the one Dockerfile/image.
+#
+# A `push` job (`needs: deploy`) sends a release notification via `snakenet-org/pulsar-push@v4` to
+# apps/pulsar, the standalone VAPID web-push relay app — authenticated by a Pulsar Access Key + the
+# shared X-Pulsar-Token secret. A separate `notify_build_failure` job (`needs: build-nebula`,
+# `if: failure()`) sends the same kind of push notification when the `build-nebula` job itself fails,
+# so a broken build/push-to-ghcr is surfaced the same way a successful deploy already is — it can't be
+# folded into the `push` job since that one is gated on `deploy` succeeding, which never runs at all
+# once `build-nebula` has failed. Nebula has no push_topic_id of its own minted in Pulsar yet, same as
+# Singularity before it — deliberately reusing Gravity's own topic id
+# (`7dc8bdea-d5d0-4ecb-ad28-14db3a4db413`, the same one Singularity already reuses) rather than
+# leaving this out entirely or inventing a new one, so Nebula's build notifications land in the same
+# place as Gravity's and Singularity's until/unless a dedicated topic is created for it later.
 
 name: Build Pipeline for Nebula Vault
 run-name: ${{ github.actor }} is deploying Nebula Vault 🌌
@@ -59,9 +70,31 @@ jobs:
               ghcr.io/${{ github.actor }}/${{ env.MODULE }}:${{ github.ref_name }}
               ghcr.io/${{ github.actor }}/${{ env.MODULE }}:latest
             labels: |
+              org.opencontainers.image.title=${{ env.MODULE }}
+              org.opencontainers.image.description=Self-hosted secrets manager for snakeNet.org
               org.opencontainers.image.revision=${{ github.sha }}
               org.opencontainers.image.vendor=snakeNet.org
               org.opencontainers.image.url=https://snakeNet.org/
+
+  # See the header comment above for why this is its own job, gated on build-nebula having failed,
+  # rather than a failure-handling step inside the build job itself.
+  notify_build_failure:
+    needs: build-nebula
+    if: failure()
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+        - name: Send Build Failure Notification to Pulsar
+          id: pulsar_push_failure
+          uses: snakenet-org/pulsar-push@v4
+          with:
+            push_service_url: ${{ vars.PULSAR_PUSH_URL }}
+            push_service_access_key: ${{ secrets.PULSAR_PUSH_API_KEY }}
+            push_service_token: ${{ secrets.PULSAR_PUSH_TOKEN }}
+            push_topic_id: '7dc8bdea-d5d0-4ecb-ad28-14db3a4db413'
+            push_message_title: 'Nebula Vault ${{ github.ref_name }} build failed!'
+            push_message_body: '${{ github.actor }}''s build for Nebula Vault ${{ github.ref_name }} failed.'
+            push_message_url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
 
   # See the header comment above for why this is its own job, gated on build-nebula's success,
   # rather than inline steps in that job.
@@ -81,3 +114,22 @@ jobs:
             deployment_token: ${{ secrets.DEPLOYMENT_TOKEN }}
             image: ghcr.io/${{ github.actor }}/nebula
             version: ${{ github.ref_name }}
+
+  # See the header comment above for why this is its own job, gated on deploy's success, rather than
+  # inline steps in that job.
+  push:
+    needs: deploy
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+        - name: Send Push Notification to Pulsar
+          id: pulsar_push
+          uses: snakenet-org/pulsar-push@v4
+          with:
+            push_service_url: ${{ vars.PULSAR_PUSH_URL }}
+            push_service_access_key: ${{ secrets.PULSAR_PUSH_API_KEY }}
+            push_service_token: ${{ secrets.PULSAR_PUSH_TOKEN }}
+            push_topic_id: '7dc8bdea-d5d0-4ecb-ad28-14db3a4db413'
+            push_message_title: 'Nebula Vault ${{ github.ref_name }} deployed!'
+            push_message_body: '${{ github.actor }} just deployed Nebula Vault v${{ github.ref_name }}.'
+            push_message_url: 'https://snakenet.org/'

@@ -10,16 +10,22 @@
     - can_edit       — owner, admin, or ProjectShare.role == EDITOR. Governs key CRUD (name/
                        description/environment/type/sync_enabled) and creating/deleting keys — but
                        NOT what a value actually IS, see can_edit_value.
-    - can_reveal     — owner, admin, or ProjectShare.role == EDITOR. Governs decrypting a secret back
-                       to plaintext (nebula.secrets.reveal_value) — a shared EDITOR may read/copy a
-                       value but never change one, see can_edit_value.
-    - can_edit_value — owner or admin ONLY, regardless of share role. Governs setting/changing what a
-                       key's value IS: set_value, an initial value or source_key_id at create time,
-                       and bulk_create_keys (every row of a .env upload sets a value). A shared
-                       EDITOR can rename/delete/reassign-environment/toggle-sync a key and can reveal
-                       its current value, but can never write a new one — see nebula.secrets.set_value.
-    - can_manage_sharing / can_manage_access_keys / can_delete / can_transfer_ownership — owner or
-      admin only.
+    - can_reveal     — owner, admin, or ANY ProjectShare row (either role), since 2026-08-17. Governs
+                       decrypting a secret back to plaintext (nebula.secrets.reveal_value) and
+                       copying it — a shared VIEWER or EDITOR may both read/copy a value, neither can
+                       change one, see can_edit_value.
+    - can_edit_value — owner, admin, or ProjectShare.role == EDITOR, since 2026-08-17 (previously
+                       owner/admin only). Governs setting/changing what a key's value IS: set_value,
+                       an initial value or source_key_id at create time, and bulk_create_keys (every
+                       row of a .env upload sets a value). A shared VIEWER still can never write a
+                       value — see nebula.secrets.set_value.
+    - can_manage_sharing / can_manage_access_keys / can_manage_github — owner, admin, or
+      ProjectShare.role == EDITOR, since 2026-08-17 (previously owner/admin only) — an EDITOR may now
+      also change project settings (sharing, API access keys, GitHub sync config), matching their
+      widened "everything a viewer can do, plus settings and value CRUD" role. A shared VIEWER still
+      cannot reach any of these.
+    - can_delete / can_transfer_ownership — owner or admin ONLY, regardless of share role. Deleting
+      or handing off the whole Project stays out of reach for even an EDITOR share.
   These mirror gravity.pulsars' can_edit/can_change_state shape: bare functions taking already-loaded
   objects, no ORM queries of their own, so a router can resolve everything it needs in one pass and
   then just call these as pure checks.
@@ -36,14 +42,26 @@
   2026-08-12: added list_editable_project_ids (GitHub #4) — owner-or-EDITOR-share project ids only
   (narrower than list_projects, which also includes VIEWER shares) — backing the Audit Logs page and
   Dashboard's non-admin scoping in nebula.audit/nebula.dashboard.
+  2026-08-17: reworked the permission matrix per an explicit product spec restating the whole model —
+  widened can_reveal to also cover a shared VIEWER (not just EDITOR — a Viewer can now view+copy
+  secrets and variables, matching the spec's "can view secrets and copy secrets and variables"), and
+  widened can_edit_value/can_manage_sharing/can_manage_access_keys/can_manage_github from owner/admin
+  ONLY to also cover a shared EDITOR (matching the spec's "editor can also change the project
+  settings and update/add/remove secrets and variables"). can_edit_value/can_manage_sharing/
+  can_manage_access_keys/can_manage_github all gained a `share` parameter as part of this (same
+  signature shape can_view/can_edit/can_reveal already had). can_delete/can_transfer_ownership are
+  unchanged — an EDITOR still cannot delete or hand off the whole Project ("editor users can not
+  delete an entire project"), and list_projects/list_editable_project_ids are unchanged — an owner
+  (non-admin) still only ever sees Projects they own or are shared on, while an admin still sees
+  every Project regardless of ownership.
 @ai-rules:
   - Every list/get that returns Projects to a caller MUST go through list_projects/
     get_visible_project — never a bare `select(Project)` elsewhere in the codebase.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 2.3.0
+@version: 3.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-12
+@date: 2026-08-17
 """
 
 import uuid
@@ -84,6 +102,13 @@ def can_edit(actor: UserAccount, project: Project, share: ProjectShare | None) -
 
 
 def can_reveal(actor: UserAccount, project: Project, share: ProjectShare | None) -> bool:
+    """Owner, admin, or ANY share role (VIEWER or EDITOR) — since 2026-08-17, a shared VIEWER may
+    read/copy a secret's plaintext exactly like an EDITOR always could; only can_edit_value still
+    tells the two roles apart."""
+    return actor.is_admin or project.owner_id == actor.id or share is not None
+
+
+def can_edit_value(actor: UserAccount, project: Project, share: ProjectShare | None) -> bool:
     return (
         actor.is_admin
         or project.owner_id == actor.id
@@ -91,22 +116,31 @@ def can_reveal(actor: UserAccount, project: Project, share: ProjectShare | None)
     )
 
 
-def can_edit_value(actor: UserAccount, project: Project) -> bool:
-    return actor.is_admin or project.owner_id == actor.id
+def can_manage_sharing(actor: UserAccount, project: Project, share: ProjectShare | None) -> bool:
+    return (
+        actor.is_admin
+        or project.owner_id == actor.id
+        or (share is not None and share.role == ShareRole.EDITOR)
+    )
 
 
-def can_manage_sharing(actor: UserAccount, project: Project) -> bool:
-    return actor.is_admin or project.owner_id == actor.id
+def can_manage_access_keys(actor: UserAccount, project: Project, share: ProjectShare | None) -> bool:
+    return (
+        actor.is_admin
+        or project.owner_id == actor.id
+        or (share is not None and share.role == ShareRole.EDITOR)
+    )
 
 
-def can_manage_access_keys(actor: UserAccount, project: Project) -> bool:
-    return actor.is_admin or project.owner_id == actor.id
-
-
-def can_manage_github(actor: UserAccount, project: Project) -> bool:
+def can_manage_github(actor: UserAccount, project: Project, share: ProjectShare | None) -> bool:
     """Configuring/triggering GitHub sync exposes every secret in the Project externally — same
-    owner/admin-only trust tier as reveal/sharing/access-keys/delete."""
-    return actor.is_admin or project.owner_id == actor.id
+    owner/admin/EDITOR-share trust tier as every other "change project settings" capability, since
+    2026-08-17 (previously owner/admin only)."""
+    return (
+        actor.is_admin
+        or project.owner_id == actor.id
+        or (share is not None and share.role == ShareRole.EDITOR)
+    )
 
 
 def can_delete(actor: UserAccount, project: Project) -> bool:

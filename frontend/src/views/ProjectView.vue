@@ -6,13 +6,14 @@
     (Key | Environment | Value | actions) with an Environment filter above it, not a grid.
     can_edit/can_reveal/can_edit_value are derived from project.my_role (owner/admin/editor/viewer —
     see nebula.projects' permission matrix, mirrored client-side only for showing/hiding controls;
-    the backend re-checks everything independently). Since 2026-08-09 (later same day), a shared
-    EDITOR can reveal+copy a value (canReveal) but can no longer set/change one (canEditValue,
-    owner/admin only) — canEdit itself is unchanged and still governs rename/delete/environment-
+    the backend re-checks everything independently). Since 2026-08-17, canReveal is true for ANY
+    visible role — a shared VIEWER can now reveal+copy a value too, not just an EDITOR — and
+    canEditValue now covers owner/admin/EDITOR (widened from owner/admin only; a VIEWER still can't
+    set/change one) — canEdit itself is unchanged and still governs rename/delete/environment-
     reassignment/sync-toggle/creating a bare key. The "New key" form's value Tabs (direct-value /
-    reference) only render for canEditValue; an EDITOR instead sees just the Type Select, creating a
-    valueless key an owner/admin fills in later. The per-row "Set value" popover trigger is gated on
-    canEditValue, not canEdit. Values are masked (`•••••••`) by default —
+    reference) only render for canEditValue; a VIEWER instead sees just the Type Select, creating a
+    valueless key an owner/admin/editor fills in later. The per-row "Set value" popover trigger is
+    gated on canEditValue, not canEdit. Values are masked (`•••••••`) by default —
     revealValue() is called on demand per key and the plaintext is kept only in this component's own
     `revealed` map (never persisted, cleared on navigation since the component unmounts). Editing a
     value is an inline per-row shadcn-vue Popover. Deleting a key goes through a shadcn-vue
@@ -172,11 +173,18 @@
     clipboard write — the "always audit-log a mutating/extracting action" rule (see CLAUDE.md)
     applied to the one action that previously left no trail at all, since a quick copy never even
     calls revealSecretValue when the row is already expanded.
+    2026-08-17: permission-matrix rework per an explicit product spec restating the whole access
+    model (see nebula.projects' module docstring). canReveal widened to any visible role (a VIEWER
+    can now reveal+copy); canEditValue widened to owner/admin/EDITOR (an EDITOR can now set/change a
+    value, matching their new "can update/add/remove secrets and variables" role); the header
+    "Settings" button gate widened from owner/admin to owner/admin/editor, since an EDITOR can now
+    also reach the Settings page. can_edit/can_delete and every rename/delete/environment-
+    reassignment/sync-toggle control are unchanged.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, tooltip, checkbox, alert-dialog, dialog, skeleton)
-  @version: 9.0.0
+  @version: 9.1.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-12
+  @date: 2026-08-17
 -->
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
@@ -214,11 +222,13 @@ const keys = ref([]);
 const loading = ref(true);
 
 const canEdit = computed(() => ['owner', 'admin', 'editor'].includes(project.value?.my_role));
-const canReveal = computed(() => ['owner', 'admin', 'editor'].includes(project.value?.my_role));
-// Distinct from canEdit/canReveal: a shared EDITOR can rename/delete/reassign-environment/toggle-
-// sync a key and can now reveal+copy its current value, but can never set/change what a value IS —
-// see nebula.projects' can_edit_value (owner/admin only).
-const canEditValue = computed(() => ['owner', 'admin'].includes(project.value?.my_role));
+// Since 2026-08-17: ANY visible role (owner/admin/editor/viewer) can reveal+copy a value — see
+// nebula.projects' can_reveal, widened to also cover a shared VIEWER.
+const canReveal = computed(() => !!project.value?.my_role);
+// Distinct from canEdit/canReveal: an EDITOR can rename/delete/reassign-environment/toggle-sync a
+// key, reveal+copy its current value, AND (since 2026-08-17) set/change what a value IS — only a
+// VIEWER still can never write one — see nebula.projects' can_edit_value.
+const canEditValue = computed(() => ['owner', 'admin', 'editor'].includes(project.value?.my_role));
 
 async function loadAll() {
   loading.value = true;
@@ -269,8 +279,9 @@ const savingKey = ref(false);
 // A key's value can come from another key elsewhere in the vault instead of being set directly —
 // same custom-vs-reference Tabs shape as ProjectSettingsView's GitHub sync PAT picker. Referencing
 // is explicitly cross-project, so the current project is excluded from the picker; the backend
-// independently re-enforces both that and the owner/admin (can_reveal) bar on the source project —
-// these filters just keep the picker from ever offering an option the API would reject.
+// independently re-enforces both that and the can_reveal bar on the source project (since
+// 2026-08-17, ANY visible role — owner/admin/editor/viewer — passes can_reveal) — these filters
+// just keep the picker from ever offering an option the API would reject.
 const newKeyValueMode = ref('direct'); // 'direct' | 'reference'
 const referenceSourceProjects = ref([]);
 const loadingReferenceSourceProjects = ref(false);
@@ -284,9 +295,7 @@ async function ensureReferenceSourceProjectsLoaded() {
   loadingReferenceSourceProjects.value = true;
   try {
     const all = await api.listProjects();
-    referenceSourceProjects.value = all.filter(
-      (p) => p.id !== props.projectId && ['owner', 'admin', 'editor'].includes(p.my_role)
-    );
+    referenceSourceProjects.value = all.filter((p) => p.id !== props.projectId && !!p.my_role);
   } catch (e) {
     toast.error(e.message);
   } finally {
@@ -718,7 +727,7 @@ async function saveValue() {
           <p v-if="project.description" class="text-muted-foreground text-sm mt-1">{{ project.description }}</p>
         </div>
         <Button
-          v-if="['owner', 'admin'].includes(project.my_role)"
+          v-if="['owner', 'admin', 'editor'].includes(project.my_role)"
           variant="outline"
           @click="emit('navigate', `/projects/${projectId}/settings`)"
         >
