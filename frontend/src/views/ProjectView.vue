@@ -180,15 +180,20 @@
     "Settings" button gate widened from owner/admin to owner/admin/editor, since an EDITOR can now
     also reach the Settings page. can_edit/can_delete and every rename/delete/environment-
     reassignment/sync-toggle control are unchanged.
+    2026-08-27: the single header "Settings" button is now three buttons — General settings/Access
+    Management/Git-Sync — one per the distinct views ProjectSettingsView.vue was split into (see
+    App.vue's same-day journal entry). Briefly four buttons the same day (Sharing was its own
+    button) until Sharing and Access Management were merged back into one view/button per a
+    same-day follow-up ask. Same visibility gate as before (owner/admin/editor), unchanged.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, tooltip, checkbox, alert-dialog, dialog, skeleton)
-  @version: 9.1.0
+  @version: 9.3.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-17
+  @date: 2026-08-27
 -->
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { PhArrowLeft, PhArrowsClockwise, PhCheck, PhCopy, PhDownload, PhEye, PhEyeSlash, PhGear, PhInfo, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhWarning, PhX } from '@phosphor-icons/vue';
+import { PhArrowLeft, PhArrowsClockwise, PhCheck, PhCopy, PhDownload, PhEye, PhEyeSlash, PhGearSix, PhGithubLogo, PhInfo, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhUsers, PhWarning, PhX } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { useConfig } from '../composables/useConfig';
@@ -721,18 +726,22 @@ async function saveValue() {
     </div>
 
     <template v-else-if="project">
-      <div class="flex items-start justify-between gap-4 mb-6">
+      <div class="flex items-start justify-between gap-4 mb-6 flex-wrap">
         <div>
           <h1 class="text-2xl font-bold">{{ project.name }}</h1>
           <p v-if="project.description" class="text-muted-foreground text-sm mt-1">{{ project.description }}</p>
         </div>
-        <Button
-          v-if="['owner', 'admin', 'editor'].includes(project.my_role)"
-          variant="outline"
-          @click="emit('navigate', `/projects/${projectId}/settings`)"
-        >
-          <PhGear :size="16" weight="bold" /> Settings
-        </Button>
+        <div v-if="['owner', 'admin', 'editor'].includes(project.my_role)" class="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" @click="emit('navigate', `/projects/${projectId}/settings`)">
+            <PhGearSix :size="14" weight="bold" /> General settings
+          </Button>
+          <Button variant="outline" size="sm" @click="emit('navigate', `/projects/${projectId}/settings/access`)">
+            <PhUsers :size="14" weight="bold" /> Access Management
+          </Button>
+          <Button variant="outline" size="sm" @click="emit('navigate', `/projects/${projectId}/settings/git-sync`)">
+            <PhGithubLogo :size="14" weight="bold" /> Git-Sync
+          </Button>
+        </div>
       </div>
 
       <Card v-if="!environments.length" class="mb-6">

@@ -4,10 +4,10 @@
     pattern) maps the path to a view. Unauthenticated users see LoginView. /reentry completes the
     OIDC callback. Page switches run a blur-fade transition (navigate(): blur out 0.13s, swap the
     component, let CSS reveal the new page 0.22s). Single fixed dark-glass theme.
-    `/projects/<id>` and `/projects/<id>/settings` are this app's two path-param routes, parsed out
-    of `path.value` by regex since there's no vue-router — the matched id is passed down as a
-    `project-id` prop; `undefined` (not null) when absent so Vue omits the attribute entirely for
-    every other view. On window/tab focus, any authenticated session (local or OIDC) is silently
+    `/projects/<id>` and `/projects/<id>/settings[/access|/git-sync]` are this app's path-param
+    routes, parsed out of `path.value` by one regex since there's no vue-router — the matched id is
+    passed down as a `project-id` prop; `undefined` (not null) when absent so Vue omits the attribute
+    entirely for every other view. On window/tab focus, any authenticated session (local or OIDC) is silently
     refreshed via useAuth.refreshSession() — see that composable for how each kind actually refreshes
     and, for OIDC, its 24h absolute session cap.
     The nav rail is built from shadcn-vue Button/Tooltip/Separator/Avatar primitives (icon-only by
@@ -51,11 +51,22 @@
     actually admin-only (`v-if="isAdmin"` around the whole entry, both collapsed/expanded variants),
     since System Settings' four danger zones (reset all data, reset logs, import/export vault — see
     that view's own header) are the one page in this app that stays admin-only end to end.
+    2026-08-27: the former single ProjectSettingsView.vue (Details/Sharing/API keys/GitHub sync/
+    Danger zone all on one page) is split into three distinct routes/views —
+    ProjectGeneralSettingsView (`/settings`, kept bare so old links still resolve),
+    ProjectAccessManagementView (`/settings/access` — Sharing + API access keys together; briefly
+    two separate views/routes the same day, merged back into one per a same-day follow-up ask, since
+    both share the exact same owner/admin/editor permission tier), ProjectGitSyncView
+    (`/settings/git-sync`) — per product ask. `settingsSection` (parsed from the same `projectMatch`
+    regex, with an extra optional capture group for the sub-path segment) picks the right one;
+    `undefined`/no match falls through to plain ProjectView. Each of the three views renders its own
+    `ProjectSettingsNav` sub-nav (back-to-project + a row of buttons jumping directly between the
+    three sections) rather than App.vue's own nav rail knowing about them.
   @dependencies: vue, @phosphor-icons/vue, vue-sonner, shadcn-vue (button, tooltip, separator,
     avatar, sonner)
-  @version: 5.5.0
+  @version: 5.7.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-13
+  @date: 2026-08-27
 -->
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
@@ -75,7 +86,9 @@ import ReentryView from './views/ReentryView.vue';
 import DashboardView from './views/DashboardView.vue';
 import HomeView from './views/HomeView.vue';
 import ProjectView from './views/ProjectView.vue';
-import ProjectSettingsView from './views/ProjectSettingsView.vue';
+import ProjectGeneralSettingsView from './views/ProjectGeneralSettingsView.vue';
+import ProjectAccessManagementView from './views/ProjectAccessManagementView.vue';
+import ProjectGitSyncView from './views/ProjectGitSyncView.vue';
 import EnvironmentsView from './views/EnvironmentsView.vue';
 import AuditLogsView from './views/AuditLogsView.vue';
 import SystemSettingsView from './views/SystemSettingsView.vue';
@@ -122,12 +135,31 @@ watch(isAuthed, (authed, wasAuthed) => {
   }
 });
 
-const projectMatch = computed(() => path.value.match(/^\/projects\/([^/?]+)(\/settings)?/));
+// `/projects/:id/settings` (bare, no suffix) is General settings — kept as the default settings
+// path so pre-existing links/bookmarks to plain `/settings` still resolve; the other two settings
+// views live at `/settings/access` (Sharing + API access keys, merged into one) and
+// `/settings/git-sync`. See components/ProjectSettingsNav.vue for the shared sub-nav that links
+// between all three.
+const projectMatch = computed(() => path.value.match(/^\/projects\/([^/?]+)(\/settings(?:\/([a-z-]+))?)?/));
 const projectId = computed(() => (projectMatch.value ? decodeURIComponent(projectMatch.value[1]) : null));
-const isSettings = computed(() => !!projectMatch.value?.[2]);
+const settingsSection = computed(() => {
+  if (!projectMatch.value?.[2]) return null;
+  return projectMatch.value[3] || 'general';
+});
 
 const currentView = computed(() => {
-  if (projectId.value) return isSettings.value ? ProjectSettingsView : ProjectView;
+  if (projectId.value) {
+    switch (settingsSection.value) {
+      case 'general':
+        return ProjectGeneralSettingsView;
+      case 'access':
+        return ProjectAccessManagementView;
+      case 'git-sync':
+        return ProjectGitSyncView;
+      default:
+        return ProjectView;
+    }
+  }
   if (path.value.startsWith('/projects')) return HomeView;
   if (path.value.startsWith('/environments')) return EnvironmentsView;
   if (path.value.startsWith('/audit-logs')) return AuditLogsView;
