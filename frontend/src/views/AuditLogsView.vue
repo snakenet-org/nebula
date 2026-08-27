@@ -30,7 +30,7 @@
 -->
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
-import { PhCaretLeft, PhCaretRight, PhMagnifyingGlass, PhScroll } from '@phosphor-icons/vue';
+import { PhCaretLeft, PhCaretRight, PhMagnifyingGlass, PhScroll, PhX } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { useAuth } from '../composables/useAuth';
@@ -103,6 +103,15 @@ function onSearchInput(key) {
   }, SEARCH_DEBOUNCE_MS);
 }
 
+// The search box's own (×) clear button skips the debounce entirely — a deliberate click should
+// reload immediately, not wait out the same 300ms window a keystroke would.
+function clearSearch(key) {
+  clearTimeout(debounceTimers[key]);
+  tabs[key].search = '';
+  tabs[key].page = 1;
+  loadTab(key);
+}
+
 onBeforeUnmount(() => {
   Object.values(debounceTimers).forEach(clearTimeout);
 });
@@ -142,13 +151,22 @@ function formatTime(iso) {
 
       <TabsContent value="activity" class="pt-4 space-y-3">
         <div class="relative max-w-sm">
-          <PhMagnifyingGlass :size="16" weight="bold" class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <PhMagnifyingGlass :size="14" weight="bold" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             v-model="tabs.activity.search"
             @input="onSearchInput('activity')"
             placeholder="Search by user, action, or key…"
-            class="pl-9"
+            class="pl-7 pr-7"
           />
+          <button
+            v-if="tabs.activity.search"
+            type="button"
+            title="Clear search"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            @click="clearSearch('activity')"
+          >
+            <PhX :size="14" weight="bold" />
+          </button>
         </div>
         <Card v-if="!tabs.activity.items.length"><CardContent class="p-10 text-center text-muted-foreground text-sm">{{ tabs.activity.search ? `No activity matches "${tabs.activity.search}".` : 'No activity recorded yet.' }}</CardContent></Card>
         <Card v-else class="py-0" :class="{ 'opacity-60': tabs.activity.loading }">
@@ -186,13 +204,22 @@ function formatTime(iso) {
 
       <TabsContent value="api-calls" class="pt-4 space-y-3">
         <div class="relative max-w-sm">
-          <PhMagnifyingGlass :size="16" weight="bold" class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <PhMagnifyingGlass :size="14" weight="bold" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             v-model="tabs['api-calls'].search"
             @input="onSearchInput('api-calls')"
             placeholder="Search by access key, action, key, or project…"
-            class="pl-9"
+            class="pl-7 pr-7"
           />
+          <button
+            v-if="tabs['api-calls'].search"
+            type="button"
+            title="Clear search"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            @click="clearSearch('api-calls')"
+          >
+            <PhX :size="14" weight="bold" />
+          </button>
         </div>
         <Card v-if="!tabs['api-calls'].items.length"><CardContent class="p-10 text-center text-muted-foreground text-sm">{{ tabs['api-calls'].search ? `No API calls match "${tabs['api-calls'].search}".` : 'No API calls recorded yet.' }}</CardContent></Card>
         <Card v-else class="py-0" :class="{ 'opacity-60': tabs['api-calls'].loading }">
@@ -234,13 +261,22 @@ function formatTime(iso) {
 
       <TabsContent value="failed" class="pt-4 space-y-3">
         <div class="relative max-w-sm">
-          <PhMagnifyingGlass :size="16" weight="bold" class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <PhMagnifyingGlass :size="14" weight="bold" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <Input
             v-model="tabs.failed.search"
             @input="onSearchInput('failed')"
             placeholder="Search by access key, action, or key…"
-            class="pl-9"
+            class="pl-7 pr-7"
           />
+          <button
+            v-if="tabs.failed.search"
+            type="button"
+            title="Clear search"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            @click="clearSearch('failed')"
+          >
+            <PhX :size="14" weight="bold" />
+          </button>
         </div>
         <Card v-if="!tabs.failed.items.length"><CardContent class="p-10 text-center text-muted-foreground text-sm">{{ tabs.failed.search ? `No failed retrievals match "${tabs.failed.search}".` : 'No failed retrievals — good sign.' }}</CardContent></Card>
         <Card v-else class="py-0" :class="{ 'opacity-60': tabs.failed.loading }">

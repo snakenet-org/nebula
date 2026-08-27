@@ -85,7 +85,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -536,6 +536,14 @@ async function transferProject() {
 
           <p v-if="!shares.length" class="text-muted-foreground text-sm">Not shared with anyone yet.</p>
           <Table v-else>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Username</TableHead>
+                <TableHead>Email</TableHead>
+                <TableHead>Role</TableHead>
+                <TableHead class="w-16 text-right">Revoke</TableHead>
+              </TableRow>
+            </TableHeader>
             <TableBody>
               <TableRow v-for="share in shares" :key="share.user_id">
                 <TableCell>{{ share.username }}</TableCell>
@@ -550,8 +558,8 @@ async function transferProject() {
                   </Select>
                 </TableCell>
                 <TableCell class="text-right">
-                  <Button variant="destructive" size="icon-sm" title="Revoke access" @click="openRevokeShareDialog(share)">
-                    <PhTrash :size="14" weight="bold" />
+                  <Button variant="destructive" size="icon-xs" title="Revoke access" @click="openRevokeShareDialog(share)">
+                    <PhTrash :size="13" weight="bold" />
                   </Button>
                 </TableCell>
               </TableRow>
@@ -576,9 +584,9 @@ async function transferProject() {
               <p class="text-sm font-semibold mb-2">Copy this token now — it won't be shown again.</p>
               <div class="flex items-center gap-2">
                 <code class="font-mono text-xs flex-1 break-all">{{ createdToken }}</code>
-                <Button variant="ghost" size="icon-sm" @click="copyToken">
-                  <PhCheck v-if="copied" :size="14" weight="bold" />
-                  <PhCopy v-else :size="14" weight="bold" />
+                <Button variant="ghost" size="icon" title="Copy" @click="copyToken">
+                  <PhCheck v-if="copied" :size="16" weight="bold" />
+                  <PhCopy v-else :size="16" weight="bold" />
                 </Button>
               </div>
             </CardContent>
@@ -593,6 +601,14 @@ async function transferProject() {
 
           <p v-if="!accessKeys.length" class="text-muted-foreground text-sm">No access keys yet.</p>
           <Table v-else>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Token</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead class="w-16 text-right">Revoke</TableHead>
+              </TableRow>
+            </TableHeader>
             <TableBody>
               <TableRow v-for="k in accessKeys" :key="k.id">
                 <TableCell>{{ k.name }}</TableCell>
@@ -601,8 +617,8 @@ async function transferProject() {
                   <Badge :variant="k.revoked ? 'destructive' : 'success'">{{ k.revoked ? 'revoked' : 'active' }}</Badge>
                 </TableCell>
                 <TableCell class="text-right">
-                  <Button v-if="!k.revoked" variant="destructive" size="icon-sm" title="Revoke" @click="openRevokeKeyDialog(k)">
-                    <PhTrash :size="14" weight="bold" />
+                  <Button v-if="!k.revoked" variant="destructive" size="icon-xs" title="Revoke" @click="openRevokeKeyDialog(k)">
+                    <PhTrash :size="13" weight="bold" />
                   </Button>
                 </TableCell>
               </TableRow>
@@ -640,6 +656,14 @@ async function transferProject() {
 
           <p v-if="!githubTargets.length" class="text-muted-foreground text-sm">No repositories linked yet.</p>
           <Table v-else>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Repository</TableHead>
+                <TableHead>Sync</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead class="w-24 text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
             <TableBody>
               <TableRow v-for="t in githubTargets" :key="t.id">
                 <TableCell>
@@ -668,18 +692,18 @@ async function transferProject() {
                 <TableCell class="text-right whitespace-nowrap">
                   <Button
                     variant="ghost"
-                    size="icon-sm"
+                    size="icon-xs"
                     title="Sync this repository now"
                     :disabled="syncingTargetId === t.id"
                     @click="syncTargetNow(t)"
                   >
-                    <PhArrowsClockwise :size="14" weight="bold" />
+                    <PhArrowsClockwise :size="13" weight="bold" />
                   </Button>
-                  <Button variant="ghost" size="icon-sm" title="Edit" @click="openEditTarget(t)">
-                    <PhPencilSimple :size="14" weight="bold" />
+                  <Button variant="ghost" size="icon-xs" title="Edit" @click="openEditTarget(t)">
+                    <PhPencilSimple :size="13" weight="bold" />
                   </Button>
-                  <Button variant="destructive" size="icon-sm" title="Remove" @click="openDeleteTargetDialog(t)">
-                    <PhTrash :size="14" weight="bold" />
+                  <Button variant="destructive" size="icon-xs" title="Remove" @click="openDeleteTargetDialog(t)">
+                    <PhTrash :size="13" weight="bold" />
                   </Button>
                 </TableCell>
               </TableRow>
@@ -890,7 +914,7 @@ async function transferProject() {
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" @click="transferProject">Transfer</AlertDialogAction>
+          <AlertDialogAction variant="warning" @click="transferProject">Transfer</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

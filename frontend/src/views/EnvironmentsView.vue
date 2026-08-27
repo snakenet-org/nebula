@@ -177,8 +177,10 @@ async function deleteEnvironment() {
     </div>
 
     <Card v-else-if="!environments.length">
-      <CardContent class="p-10 text-center text-muted-foreground text-sm">
-        No environments yet — create one to start adding keys to projects.
+      <CardContent class="p-10 text-center">
+        <PhStack :size="32" weight="bold" class="mx-auto mb-3 text-muted-foreground" />
+        <p class="font-semibold">No environments yet</p>
+        <p class="text-muted-foreground text-sm mt-1">Create one to start adding keys to projects.</p>
       </CardContent>
     </Card>
 
@@ -189,7 +191,7 @@ async function deleteEnvironment() {
             <TableHead>Name</TableHead>
             <TableHead>Description</TableHead>
             <TableHead>Keys</TableHead>
-            <TableHead class="w-20"></TableHead>
+            <TableHead class="w-20 text-right">Actions</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

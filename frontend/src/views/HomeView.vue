@@ -14,7 +14,7 @@
 -->
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { PhFolderPlus, PhLockKey, PhMagnifyingGlass } from '@phosphor-icons/vue';
+import { PhFolderPlus, PhLockKey, PhMagnifyingGlass, PhX } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -113,8 +113,17 @@ const roleVariant = {
 
     <template v-else>
       <div class="relative mb-4 max-w-sm">
-        <PhMagnifyingGlass :size="16" weight="bold" class="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <Input v-model="search" placeholder="Search projects…" class="pl-9" />
+        <PhMagnifyingGlass :size="14" weight="bold" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input v-model="search" placeholder="Search projects…" class="pl-7 pr-7" />
+        <button
+          v-if="search"
+          type="button"
+          title="Clear search"
+          class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+          @click="search = ''"
+        >
+          <PhX :size="14" weight="bold" />
+        </button>
       </div>
 
       <Card v-if="!filteredProjects.length">
