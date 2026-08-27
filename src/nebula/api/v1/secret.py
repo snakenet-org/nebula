@@ -76,6 +76,19 @@
   2026-08-17: can_edit_value's signature widened to also take the caller's `share` row (create_key/
   bulk_create_keys/set_value all pass it through now) — see nebula.projects' module docstring for the
   full permission-matrix rework this session.
+  2026-08-27: new VariableType.CERTIFICATE (nebula.models.tables) — a whole uploaded file, stored/
+  encrypted exactly like a SECRET's ciphertext (the frontend reads the file as text and sends it as
+  `value`, same field a plain secret already uses — no new storage/request shape needed). Masked and
+  reveal-gated exactly like a SECRET: reveal_value/log_copy's permission checks both changed from
+  `variable_type == VariableType.SECRET` to `variable_type != VariableType.ENVIRONMENT`, since a
+  CERTIFICATE must also require can_reveal (previously it would have silently fallen through the old
+  SECRET-only check and revealed/copied for free to anyone who could merely view the Project — caught
+  before shipping, not a live bug in production). Never eligible for automatic rotation — already
+  excluded by nebula.rotation/models/secret.py's existing non-SECRET guards with no change needed
+  there; a certificate can only be "renewed" by overwriting its value with a fresh upload. See also
+  api/v1/vault.py's new PUT /vault/secret (a project-access-key-authenticated external route to
+  change any key's value, secret/variable/certificate alike) and nebula.github_sync (CERTIFICATE now
+  pushed via `gh secret set`, same as SECRET).
 @ai-rules:
   - Never include SecretKey.ciphertext or a decrypted value in any response except reveal_value's.
   - A GitHub sync failure triggered by _auto_sync_github must never surface as an error response for
@@ -85,9 +98,9 @@
     existence/no-chaining checks as a substitute for that permission check.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 6.1.0
+@version: 6.2.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-17
+@date: 2026-08-27
 """
 
 import uuid
@@ -535,9 +548,10 @@ class SecretRouter(Endpoint):
         # environment variable, regardless of this row's own (irrelevant) variable_type column.
         variable_type, _ciphertext = await secrets_service.resolve_effective(session, key)
         # An "environment" variable is already visible to anyone who can view the Project (its
-        # value ships straight in the list response) — only a "secret" needs the stricter can_reveal
-        # gate (owner/admin/shared EDITOR).
-        if variable_type == VariableType.SECRET and not projects_service.can_reveal(actor, project, share):
+        # value ships straight in the list response) — everything else ("secret" AND
+        # "certificate", both anonymized) needs the stricter can_reveal gate (owner/admin/ANY
+        # shared role).
+        if variable_type != VariableType.ENVIRONMENT and not projects_service.can_reveal(actor, project, share):
             raise HTTPException(
                 status_code=403, detail="You do not have permission to reveal values in this project"
             )
@@ -570,7 +584,7 @@ class SecretRouter(Endpoint):
         project, share = await self._project_or_404(session, actor, project_id)
         key = await self._key_or_404(session, project_id, key_id)
         variable_type, _ciphertext = await secrets_service.resolve_effective(session, key)
-        if variable_type == VariableType.SECRET and not projects_service.can_reveal(actor, project, share):
+        if variable_type != VariableType.ENVIRONMENT and not projects_service.can_reveal(actor, project, share):
             raise HTTPException(
                 status_code=403, detail="You do not have permission to copy values in this project"
             )

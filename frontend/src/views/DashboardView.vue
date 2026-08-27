@@ -19,14 +19,17 @@
     2026-08-12 (theme rebase): the three chart line colors were recolored from the old light-blue/
     gold/rose palette to the new baseline brand colors (Starlight Cyan/Solar Gold) and the universal
     destructive red, matching style.css's rebased tokens — cosmetic only, no data/scoping change.
+    2026-08-27: fifth stat card, "Certificates" (summary.certificate_count — nebula.dashboard's new
+    third variable_type partition alongside Variables/Secrets, VariableType.CERTIFICATE) — the stat
+    grid widened `lg:grid-cols-4` → `lg:grid-cols-5` to fit it.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, skeleton)
-  @version: 1.2.1
+  @version: 1.3.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-12
+  @date: 2026-08-27
 -->
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { PhFolders, PhKey, PhLockKey, PhStack, PhWarning } from '@phosphor-icons/vue';
+import { PhCertificate, PhFolders, PhKey, PhLockKey, PhStack, PhWarning } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { Card, CardContent } from '@/components/ui/card';
@@ -64,6 +67,7 @@ const cards = computed(() => [
   { label: 'Projects', value: summary.value?.project_count ?? 0, icon: PhFolders },
   { label: 'Variables', value: summary.value?.variable_count ?? 0, icon: PhKey },
   { label: 'Secrets', value: summary.value?.secret_count ?? 0, icon: PhLockKey },
+  { label: 'Certificates', value: summary.value?.certificate_count ?? 0, icon: PhCertificate },
 ]);
 </script>
 
@@ -75,8 +79,8 @@ const cards = computed(() => [
     </div>
 
     <div v-if="loading" class="space-y-6">
-      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Skeleton class="h-24 rounded-xl" v-for="i in 4" :key="i" />
+      <div class="grid sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <Skeleton class="h-24 rounded-xl" v-for="i in 5" :key="i" />
       </div>
       <div class="grid lg:grid-cols-3 gap-4">
         <Skeleton class="h-48 rounded-xl" v-for="i in 3" :key="i" />
@@ -84,7 +88,7 @@ const cards = computed(() => [
     </div>
 
     <template v-else>
-      <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <div class="grid sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
         <Card v-for="c in cards" :key="c.label">
           <CardContent class="flex items-center gap-3">
             <div class="rounded-lg bg-primary/10 text-primary p-2.5">

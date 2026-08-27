@@ -13,9 +13,13 @@
   (unlike Gravity's GRAVITY_TZ), so there's no other zone to prefer.
   VaultProjectResponse backs GET /project — the Project the presented access key resolves to;
   `description` is nullable since `Project.description` itself is optional.
-@version: 1.2.0
+  VaultSecretSetRequest (2026-08-27) backs PUT /vault/secret — the one vault.py route that CHANGES a
+  value rather than reading one. `value` is plain text for every variable_type alike (secret,
+  variable, or the new certificate — a certificate is just an uploaded file's text content, stored
+  the exact same way a plain secret's value already is, see nebula.models.tables.VariableType).
+@version: 1.3.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-07
+@date: 2026-08-27
 """
 
 from datetime import datetime
@@ -26,6 +30,10 @@ from pydantic import BaseModel
 class VaultSecretResponse(BaseModel):
     key: str
     environment: str
+    value: str
+
+
+class VaultSecretSetRequest(BaseModel):
     value: str
 
 

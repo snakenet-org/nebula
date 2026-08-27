@@ -57,10 +57,15 @@
   - Always resolve a key's variable_type/ciphertext via resolve_effective before reading either
     directly — a reference row's OWN columns (`variable_type`, `ciphertext`) must never be trusted.
   - Maintain 100% type-hinting coverage.
+  2026-08-27: set_value's `updated_by` widened to `uuid.UUID | None` — see its own docstring — to
+  support api/v1/vault.py's new PUT /secret route, a Project-access-key-authenticated caller with no
+  UserAccount to attribute the write to. No other behavior changed; VariableType.CERTIFICATE (a
+  whole uploaded file, nebula.models.tables) needs no code changes anywhere in this module — it's
+  stored/encrypted through the exact same `ciphertext`/`value` path a plain secret already uses.
 @dependencies: sqlalchemy[asyncio]
-@version: 3.1.0
+@version: 3.2.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-12
+@date: 2026-08-27
 """
 
 import uuid
@@ -330,7 +335,7 @@ async def set_value(
     key: SecretKey,
     *,
     plaintext: str,
-    updated_by: uuid.UUID,
+    updated_by: uuid.UUID | None,
     rotation_frequency: int | None = None,
     rotation_unit: RotationUnit | str | None = None,
 ) -> SecretKey:
@@ -343,6 +348,11 @@ async def set_value(
     no "omitted means unchanged" here, since the Set Value form always submits the schedule's
     current on-screen state alongside the value. Raises RotationNotSupportedError for a non-SECRET
     key given a schedule (see create_key's docstring for the same rule).
+
+    `updated_by=None` (2026-08-27) is for a caller with no attributable UserAccount — api/v1/
+    vault.py's PUT /secret route, a Project access key rather than a human, passes None here for the
+    same "no attributable actor" reasoning nebula.rotation.rotate_key's own updated_by=None already
+    uses.
     """
     if key.source_key_id is not None:
         raise SecretKeyIsReferenceError(str(key.id))

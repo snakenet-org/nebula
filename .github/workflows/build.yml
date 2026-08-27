@@ -8,8 +8,16 @@
 # so redeploying Nebula Vault from inside the still-running build job that produced its new image
 # would mean that job asks the service it depends on to restart itself before the job has actually
 # finished — a fresh `needs:` job only starts once build-nebula has fully completed and exited
-# cleanly). Single image only (unlike Satellite, which also deploys its separate satellite-link
-# reporter) — Nebula Vault has just the one Dockerfile/image.
+# cleanly). Two images, built from the same source and versioned identically (see Dockerfile's own
+# header): `nebula` (the default, lite — no embedded database, built from ./Dockerfile) and
+# `nebula-aio` (all-in-one, embedded PostgreSQL 17, built from ./Dockerfile.aio) — each gets its own
+# version tag plus its own `:latest` within its own image repo, so `nebula` being "the default" is
+# about which image name a bare `nebula:latest` pull resolves to, not about `nebula-aio` lacking a
+# floating tag of its own. `deploy` below still redeploys `nebula-aio` specifically —
+# ops.snakenet.io's own existing Nebula Vault instance already runs on the embedded-Postgres image
+# with its data volume in place, and switching that live deployment onto the lite image would mean
+# pointing it at an external Postgres it doesn't have; the newly-added `nebula` image is for OTHER
+# self-hosters who'd rather bring their own database, not a change to this app's own ops deployment.
 #
 # A `push` job (`needs: deploy`) sends a release notification via `snakenet-org/pulsar-push@v4` to
 # apps/pulsar, the standalone VAPID web-push relay app — authenticated by a Pulsar Access Key + the
@@ -59,7 +67,7 @@ jobs:
         - run: echo "${{ github.sha }}" > ./BUILD
         - run: echo `date` > ./BUILD_DATE
 
-        - name: Build and push image multi arch
+        - name: Build and push Lite image (default, nebula)
           uses: docker/build-push-action@v5
           with:
             context: .
@@ -71,7 +79,24 @@ jobs:
               ghcr.io/${{ github.actor }}/${{ env.MODULE }}:latest
             labels: |
               org.opencontainers.image.title=${{ env.MODULE }}
-              org.opencontainers.image.description=Self-hosted secrets manager for snakeNet.org
+              org.opencontainers.image.description=Self-hosted secrets manager for snakeNet.org (lite — bring your own PostgreSQL)
+              org.opencontainers.image.revision=${{ github.sha }}
+              org.opencontainers.image.vendor=snakeNet.org
+              org.opencontainers.image.url=https://snakeNet.org/
+
+        - name: Build and push All-in-One image (nebula-aio)
+          uses: docker/build-push-action@v5
+          with:
+            context: .
+            file: ./Dockerfile.aio
+            platforms: linux/amd64
+            push: true
+            tags: |
+              ghcr.io/${{ github.actor }}/${{ env.MODULE }}-aio:${{ github.ref_name }}
+              ghcr.io/${{ github.actor }}/${{ env.MODULE }}-aio:latest
+            labels: |
+              org.opencontainers.image.title=${{ env.MODULE }}-aio
+              org.opencontainers.image.description=Self-hosted secrets manager for snakeNet.org (all-in-one — embedded PostgreSQL)
               org.opencontainers.image.revision=${{ github.sha }}
               org.opencontainers.image.vendor=snakeNet.org
               org.opencontainers.image.url=https://snakeNet.org/
@@ -112,7 +137,7 @@ jobs:
             domain: 'ops.snakenet.io'
             satellite_token: ${{ secrets.SATELLITE_TOKEN }}
             deployment_token: ${{ secrets.DEPLOYMENT_TOKEN }}
-            image: ghcr.io/${{ github.actor }}/nebula
+            image: ghcr.io/${{ github.actor }}/nebula-aio
             version: ${{ github.ref_name }}
 
   # See the header comment above for why this is its own job, gated on deploy's success, rather than

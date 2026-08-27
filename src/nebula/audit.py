@@ -57,13 +57,19 @@
   same "never re-joined later" reasoning as actor_label/object_label (see
   models.tables.AuditLogEntry.project_label) — backing the "API calls" tab's new Project column
   without a live join through the loose (SET NULL) `project_id` reference.
+  2026-08-27: VAULT_ACTIONS gained "vault.update" (api/v1/vault.py's new PUT /vault/secret, a
+  project-access-key-authenticated route that CHANGES a key's value rather than reading one) — it
+  rolls up into list_api_calls/list_failed_retrievals/the Dashboard's api_requests/failed_attempts
+  series alongside the other three exactly like any other vault.py action. Deliberately NOT added to
+  EXTRACTION_ACTIONS — setting a value never reveals one, so it must never count toward "how many
+  times has this key's plaintext left the vault".
 @ai-rules:
   - Never put a plaintext secret value in `detail` or any other column.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 1.4.0
+@version: 1.5.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-12
+@date: 2026-08-27
 """
 
 import uuid
@@ -88,8 +94,10 @@ _SEARCHABLE_COLUMNS = (
     AuditLogEntry.project_label,
 )
 
-# Every api/v1/vault.py route's action string — see the module docstring above.
-VAULT_ACTIONS: tuple[str, ...] = ("vault.retrieve", "vault.project", "vault.status")
+# Every api/v1/vault.py route's action string — see the module docstring above. "vault.update"
+# (2026-08-27) is PUT /vault/secret — the one vault.py route that also requires X-Nebula-Token on
+# top of the project access key, since it writes a value rather than just reading one.
+VAULT_ACTIONS: tuple[str, ...] = ("vault.retrieve", "vault.project", "vault.status", "vault.update")
 
 # The two actions that mean "a SecretKey's value actually left the vault" — see the module docstring.
 EXTRACTION_ACTIONS: tuple[str, ...] = ("secret.reveal", "vault.retrieve")

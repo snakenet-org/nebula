@@ -1,6 +1,40 @@
 # Deployment
 
-## Running the Docker image
+## Two image variants
+
+Nebula Vault is built from the same source into two image variants, always versioned identically
+but published under different names:
+
+| Image | Default? | Database | Dockerfile | Entrypoint |
+|---|---|---|---|---|
+| `nebula` | Yes — also tagged `:latest` | External PostgreSQL you provide | [`Dockerfile`](../Dockerfile) | [`entrypoint.lite.sh`](../entrypoint.lite.sh) |
+| `nebula-aio` | No — version tag only | Embedded PostgreSQL 17 | [`Dockerfile.aio`](../Dockerfile.aio) | [`entrypoint.aio.sh`](../entrypoint.aio.sh) |
+
+Pick `nebula` if you already run Postgres somewhere (a managed database, an existing cluster) and
+want the smaller image; pick `nebula-aio` for a single self-contained container with nothing else
+to stand up.
+
+## Running the Lite image (`nebula`, default)
+
+```bash
+docker run -d \
+  --name nebula \
+  -p 8000:8000 \
+  -e NEBULA_MASTER_KEY="$(openssl rand -base64 32)" \
+  -e NEBULA_TOKEN="$(openssl rand -base64 32)" \
+  -e NEBULA_JWT_SECRET="$(openssl rand -base64 32)" \
+  -e NEBULA_ADMIN_USER=admin \
+  -e NEBULA_ADMIN_PASS=change-me \
+  -e NEBULA_POSTGRES_HOST=your-postgres-host \
+  -e NEBULA_POSTGRES_PASSWORD=your-postgres-password \
+  scr.snakenet.io/nebula:latest
+```
+
+`entrypoint.lite.sh` fails fast if `NEBULA_POSTGRES_HOST` is unset — this image has no embedded
+database to fall back to. Point the full `NEBULA_POSTGRES_*` group at a real, already-running
+PostgreSQL instance, then it runs `alembic upgrade head` and starts the app directly.
+
+## Running the All-in-One image (`nebula-aio`)
 
 ```bash
 docker run -d \
@@ -12,16 +46,17 @@ docker run -d \
   -e NEBULA_JWT_SECRET="$(openssl rand -base64 32)" \
   -e NEBULA_ADMIN_USER=admin \
   -e NEBULA_ADMIN_PASS=change-me \
-  scr.snakenet.io/nebula:latest
+  scr.snakenet.io/nebula-aio:<version>
 ```
 
 The `/data` volume is required for persistence — it holds the embedded PostgreSQL cluster (see
 below). Without a mounted volume, every secret is lost the moment the container is recreated.
 
-## Embedded PostgreSQL
+## Embedded PostgreSQL (`nebula-aio` only)
 
-Unlike every sibling snakeNet.org service, Nebula Vault runs its own PostgreSQL 17 instance
-**inside the same container**, started by `entrypoint.sh` before the API:
+Unlike every sibling snakeNet.org service — and unlike its own sibling `nebula` image above —
+`nebula-aio` runs its own PostgreSQL 17 instance **inside the same container**, started by
+`entrypoint.aio.sh` before the API:
 
 1. Fails fast if `NEBULA_MASTER_KEY` or `NEBULA_TOKEN` is unset — before touching Postgres at all.
 2. On first boot (`$PGDATA/PG_VERSION` absent), runs `initdb` with UTF-8 encoding, then creates the
@@ -39,16 +74,21 @@ This trades the usual "separate database container" flexibility (independent sca
 backups via your Postgres tooling of choice, swapping in a managed database) for genuine
 single-container simplicity — reasonable for a self-hosted internal tool where "one container, one
 volume" is the whole point. Back up the `/data` volume the same way you'd back up any other
-container's persistent volume.
+container's persistent volume. If you'd rather keep that flexibility, use the `nebula` (lite) image
+instead.
 
 ## Required environment variables
 
-Only two variables have no safe default — the container refuses to start without them:
+Only two variables have no safe default on either image — the container refuses to start without
+them:
 
 | Variable | Purpose |
 |---|---|
 | `NEBULA_MASTER_KEY` | Encrypts every secret value at rest. **Losing this makes all data permanently unrecoverable.** See [encryption.md](encryption.md). |
 | `NEBULA_TOKEN` | The shared `X-Nebula-Token` secret required on every API call. |
+
+The `nebula` (lite) image has one more: `NEBULA_POSTGRES_HOST` must point at a real database — it
+has no embedded fallback.
 
 Everything else has a working default — see [`.env.example`](../.env.example) for the full list
 with explanations, grouped by area (server, the optional local admin login, Authentik OIDC, login
@@ -63,7 +103,7 @@ Notable ones:
 | `NEBULA_BASIC_LOGIN_DISABLED` | `no` | Hide the username/password form once Authentik is fully set up. |
 | `NEBULA_OIDC_LOGIN_DISABLED` | `yes` | Set to `no` to show "Sign in with snakeNet ID". |
 | `NEBULA_OIDC_JWKS_URL` / `_ISSUER` / `_CLIENT_ID` | *(unset)* | Authentik application details — see below. |
-| `NEBULA_POSTGRES_*` | matches the embedded Postgres defaults | Only override for local development against an external Postgres. |
+| `NEBULA_POSTGRES_*` | matches `nebula-aio`'s embedded Postgres | Required on the `nebula` (lite) image — point at your real database. Only override on `nebula-aio` for local development against an external Postgres instead of the embedded one. |
 
 ## Setting up the Authentik application
 
@@ -89,8 +129,8 @@ uv run main.py
 ## Release flow (GitHub Actions)
 
 Pushing a tag matching `X.Y.Z` or `X.Y.Z-rcN` triggers
-[`.github/workflows/build.yml`](../.github/workflows/build.yml): builds the multi-arch
-(`linux/amd64`, `linux/arm64`) image and pushes it to the snakeNet container registry, tagged both
-with the version and `latest`. The workflow deliberately stops at build+push — it does not yet
-notify or auto-deploy anywhere, since Nebula Vault isn't registered in Gravity/Satellite with real
-secrets/push-topic-ids. See the workflow file's own header comment for what to add once it is.
+[`.github/workflows/build.yml`](../.github/workflows/build.yml): builds and pushes both images to
+the snakeNet container registry, each tagged with the version and its own `:latest` (`nebula:latest`
+and `nebula-aio:latest` are independent floating tags in their own image repos) — then auto-deploys
+`nebula-aio` via Satellite (this app's own ops.snakenet.io instance already runs on the
+embedded-Postgres image) and notifies Pulsar.

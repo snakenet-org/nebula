@@ -4,28 +4,30 @@
 
 **A self-hosted secrets manager for snakeNet.org.**
 
-Projects → Environments → Keys → per-environment Values, encrypted at rest under a master key
-only you hold.
-
 </div>
 
 ---
 
 ## What is Nebula Vault?
 
-Nebula Vault stores credentials, passwords, logins, and environment variables so your team (and
-your deploy pipelines) don't have to pass them around as plaintext files, Slack messages, or shared
-spreadsheets.
+Nebula is a secrets manager you run yourself: projects hold your secrets and environment
+variables, environments keep production, staging, and everything else cleanly separated, and
+every value is encrypted at rest under a key only you hold.
+
+It was built as a free, open-source, self-hosted alternative to commercial secrets managers — no
+per-seat pricing, no vendor lock-in, and no secret ever leaves infrastructure you control.
 
 The data model is simple and maps directly onto how real applications actually configure
 themselves:
 
 - A **Project** is a bucket for one application/service's secrets (e.g. "billing-api").
-- A Project has one or more **Environments** (e.g. `production`, `staging`, `development`).
+- **Environments** (`production`, `staging`, `development`, ...) are global and shared across
+  every Project.
 - A Project has any number of **Keys** — plain, readable names like `DATABASE_URL` or
-  `STRIPE_SECRET_KEY`.
-- Each Key can hold a different **Value** per Environment — or the same value everywhere, if that's
-  all it needs (a "copy to every environment" convenience when setting a value).
+  `STRIPE_SECRET_KEY` — each linked to exactly one Environment and holding its own encrypted
+  value.
+- A Key's value can also be a **live reference** to another Key elsewhere in the vault — rotate
+  the source once, and every place that references it updates instantly.
 
 Every value is encrypted at rest with a master encryption key that **you** provide when you start
 the container. Nebula Vault's own database is never a copy/paste target for that key — it's read
@@ -76,11 +78,32 @@ Full route reference: [docs/api.md](docs/api.md).
 
 ## Running it
 
-Nebula Vault ships as a **single, self-contained Docker image** — the FastAPI backend, the built
-Vue frontend, and its own embedded PostgreSQL 17 instance all run in one container. There is no
-separate database container to stand up.
+Nebula Vault ships as two Docker image variants, built from the same source and always versioned
+identically:
+
+- **`nebula`** (the default, also tagged `:latest`) — the **lite** image. No embedded database;
+  point it at a PostgreSQL instance you already run.
+- **`nebula-aio`** — the **all-in-one** image. The FastAPI backend, the built Vue frontend, and its
+  own embedded PostgreSQL 17 instance all run in one container, no separate database container to
+  stand up.
 
 ```bash
+# Lite (default) — bring your own PostgreSQL
+docker run -d \
+  --name nebula \
+  -p 8000:8000 \
+  -e NEBULA_MASTER_KEY="$(openssl rand -base64 32)" \
+  -e NEBULA_TOKEN="$(openssl rand -base64 32)" \
+  -e NEBULA_JWT_SECRET="$(openssl rand -base64 32)" \
+  -e NEBULA_ADMIN_USER=admin \
+  -e NEBULA_ADMIN_PASS=change-me \
+  -e NEBULA_POSTGRES_HOST=your-postgres-host \
+  -e NEBULA_POSTGRES_PASSWORD=your-postgres-password \
+  scr.snakenet.io/nebula:latest
+```
+
+```bash
+# All-in-one — embedded PostgreSQL, no external database needed
 docker run -d \
   --name nebula \
   -p 8000:8000 \
@@ -90,14 +113,15 @@ docker run -d \
   -e NEBULA_JWT_SECRET="$(openssl rand -base64 32)" \
   -e NEBULA_ADMIN_USER=admin \
   -e NEBULA_ADMIN_PASS=change-me \
-  scr.snakenet.io/nebula:latest
+  scr.snakenet.io/nebula-aio:<version>
 ```
 
-`NEBULA_MASTER_KEY` and `NEBULA_TOKEN` are the two variables the container refuses to start
-without — everything else has a working default. **Write down `NEBULA_MASTER_KEY` somewhere safe.
-If you lose it, every stored secret becomes permanently unrecoverable** (there's no backdoor — that's
-the point of encryption). The `/data` volume is where the embedded Postgres cluster lives; mount it
-persistently or your secrets vanish on container recreation.
+`NEBULA_MASTER_KEY` and `NEBULA_TOKEN` are the two variables neither image will start without —
+everything else has a working default. **Write down `NEBULA_MASTER_KEY` somewhere safe.
+If you lose it, every stored secret becomes permanently unrecoverable** (there's no backdoor —
+that's the point of encryption). The lite image needs `NEBULA_POSTGRES_*` pointed at a real
+database; the all-in-one image needs its `/data` volume mounted persistently, since that's where
+the embedded Postgres cluster lives.
 
 Full deployment reference (every environment variable, the Authentik application setup, building
 from source): [docs/deployment.md](docs/deployment.md).
@@ -115,9 +139,15 @@ from source): [docs/deployment.md](docs/deployment.md).
 
 ## Stack
 
-FastAPI · Vue 3 (SPA) · Tailwind CSS · PostgreSQL 17 (embedded in the image) · SQLAlchemy (async) +
-Alembic · Authentik (OIDC) · Python 3.14, `uv`.
+FastAPI · Vue 3 (SPA) · Tailwind CSS · PostgreSQL 17 (embedded in the `nebula-aio` image, external
+for `nebula`) · SQLAlchemy (async) + Alembic · Authentik (OIDC) · Python 3.14, `uv`.
 
 ---
 
-<div align="center">© snakeNet.org, All rights reserved</div>
+<div align="center">
+
+© snakeNet.org, All rights reserved
+
+Made with ❤️ by the snakeNet.org Team, Claude AI, and Google Gemini.
+
+</div>

@@ -1,8 +1,9 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: GET /api/v1/vault/secret + GET /api/v1/vault/project + GET /api/v1/vault/status — the
-  external, machine-to-machine surface. ALL THREE are gated on a project access key alone, no
-  X-Nebula-Token.
+@ai-purpose: GET /api/v1/vault/secret + PUT /api/v1/vault/secret + GET /api/v1/vault/project +
+  GET /api/v1/vault/status — the external, machine-to-machine surface. The three GET routes are
+  gated on a project access key ALONE, no X-Nebula-Token; PUT /secret (2026-08-27, changes a value)
+  is the one exception and requires BOTH.
 @ai-context: This whole router is a THIRD auth mode alongside human-JWT (project.py/secret.py/...)
   and the public no-credential routes (health/ping/config/auth) — a spawned container pulls its own
   secrets at deploy time by presenting a project access key, not a user session or the shared
@@ -56,13 +57,29 @@
   silently orphan its older rows). This is what lets nebula.audit.extraction_counts_by_project count
   machine (access-key) extractions per key, alongside secret.py's "secret.reveal", for
   ProjectView.vue's per-key extraction icon.
+  2026-08-27: new `PUT /secret` — changes an EXISTING key's value (never creates one; same 404-on-
+  any-lookup-miss shape as GET /secret) for any variable_type: secret, environment variable, or the
+  new certificate (nebula.models.tables.VariableType.CERTIFICATE — a whole uploaded file, stored the
+  same encrypted way a plain secret's value already is). This is the one route on this router that
+  ALSO requires `X-Nebula-Token` (`dependencies=[Depends(verify_nebula_token)]` on this route only,
+  not the router) on top of the project access key — a deliberate, narrower exception to this
+  router's own "no X-Nebula-Token anywhere" rule (see the module purpose line above and
+  api/endpoint.py's docstring), since this is the one vault.py call that WRITES rather than reads: an
+  extra shared-secret gate on top of a possibly-leaked-in-a-log access key is a real second barrier
+  for a mutating call in a way it wasn't for a read. Audit-logged as "vault.update" (nebula.audit.
+  VAULT_ACTIONS) — deliberately NOT added to EXTRACTION_ACTIONS, since writing a value never reveals
+  one. Refuses a reference key (SecretKeyIsReferenceError → 409, same as the human PUT
+  /secret/{project}/{key}/value route) and fans out to every enabled GitHub sync target afterward,
+  best-effort, exactly like every other value-changing route in this app (this module's own
+  `_auto_sync_github`, attributed to the access key via record_access_key_action rather than a human
+  UserAccount).
 @ai-rules:
   - Never log the resolved plaintext value.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 5.2.0
+@version: 6.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-12
+@date: 2026-08-27
 """
 
 import uuid
@@ -71,28 +88,65 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nebula import access_keys as access_keys_service
 from nebula import audit as audit_service
 from nebula import environments as environments_service
+from nebula import github_sync as github_sync_service
 from nebula import secrets as secrets_service
 from nebula import version
-from nebula.api.endpoint import Endpoint
+from nebula.api.endpoint import Endpoint, verify_nebula_token
 from nebula.database import get_session
 from nebula.models.tables import Project, ProjectAccessKey
 from nebula.models.vault import (
     VaultProjectResponse,
     VaultSecretResponse,
+    VaultSecretSetRequest,
     VaultStatusResponse,
 )
 from nebula.naming import NAME_PATTERN
-from nebula.secrets import SecretValueNotFoundError
+from nebula.secrets import SecretKeyIsReferenceError, SecretValueNotFoundError
 
 # Every /secret query param (environment, key) shares this charset — see nebula.naming.
 _NameParam = Annotated[str, Query(min_length=1, pattern=NAME_PATTERN)]
 
 VAULT_BEARER = HTTPBearer(auto_error=True)
+
+
+async def _auto_sync_github(
+    session: AsyncSession, access_key: ProjectAccessKey, request: Request, project_id: uuid.UUID
+) -> None:
+    """Best-effort fan-out to every enabled GitHub sync target after PUT /secret changes a value —
+    same shape/reasoning as api/v1/secret.py's own `_auto_sync_github`, just attributed to the
+    Project access key that made the change (record_access_key_action) instead of a human UserAccount.
+    Never raises — a GitHub outage must never fail the value change that triggered it."""
+    try:
+        results = await github_sync_service.sync_all_for_project(session, project_id)
+    except Exception:
+        logger.exception("Auto GitHub sync crashed for project {}", project_id)
+        return
+    for result in results:
+        detail = result["error"] or (
+            f"{result['secrets_synced']} secret(s), {result['variables_synced']} variable(s) across "
+            f"{result['environments_synced']} environment(s)"
+            + (f"; {len(result['failures'])} failure(s)" if result["failures"] else "")
+        )
+        await audit_service.record_access_key_action(
+            session,
+            access_key_id=access_key.id,
+            access_key_label=access_key.name,
+            request=request,
+            action="github_sync_target.sync",
+            object_type="project_github_sync",
+            object_id=result["target_id"],
+            object_label=result["name"],
+            project_id=project_id,
+            project_label=None,
+            success=result["success"],
+            detail=f"Auto-sync on value change (via vault API): {detail}",
+        )
 
 
 async def get_access_key(
@@ -117,6 +171,16 @@ class VaultRouter(Endpoint):
             methods=["GET"],
             response_model=VaultSecretResponse,
             summary="Retrieve one secret value by environment + key name",
+        )
+        self.add_api_route(
+            "/secret",
+            self.set_secret,
+            methods=["PUT"],
+            response_model=VaultSecretResponse,
+            summary="Change the value of an existing secret, variable, or certificate key",
+            # Unlike every other route on this router, writing a value also requires X-Nebula-Token
+            # on top of the project access key — see the module docstring for why.
+            dependencies=[Depends(verify_nebula_token)],
         )
         self.add_api_route(
             "/status",
@@ -181,6 +245,80 @@ class VaultRouter(Endpoint):
 
         await _audit(success=True, object_id=secret_key.id)
         return VaultSecretResponse(key=secret_key.name, environment=env.name, value=value)
+
+    async def set_secret(
+        self,
+        environment: _NameParam,
+        key: _NameParam,
+        payload: VaultSecretSetRequest,
+        request: Request,
+        resolved: tuple[Project, ProjectAccessKey] = Depends(get_access_key),
+        session: AsyncSession = Depends(get_session),
+    ) -> VaultSecretResponse:
+        """Change an EXISTING key's value — never creates one (same lookup-miss-is-404 shape as
+        get_secret, so a caller can't distinguish "wrong key name" from "wrong environment name"
+        from "you're not allowed"). Works identically for every variable_type (secret, environment
+        variable, or the new certificate — see nebula.models.tables.VariableType) since all three
+        store their value through the exact same encrypted `ciphertext` column; a certificate is
+        just its file's text content. Refuses on a reference key (SecretKeyIsReferenceError → 409),
+        same as the human PUT /secret/{project}/{key}/value route — its value can only be changed by
+        editing the SOURCE key, in its own Project.
+        """
+        resolved_project, access_key = resolved
+
+        async def _audit(
+            *, success: bool, object_id: uuid.UUID | None = None, detail: str | None = None
+        ) -> None:
+            await audit_service.record_access_key_action(
+                session,
+                access_key_id=access_key.id,
+                access_key_label=access_key.name,
+                request=request,
+                action="vault.update",
+                object_type="secret_key",
+                object_id=object_id,
+                object_label=f"{resolved_project.name}/{environment}/{key}",
+                project_id=resolved_project.id,
+                project_label=resolved_project.name,
+                success=success,
+                detail=detail,
+            )
+
+        secret_key = await secrets_service.get_key_by_name(session, resolved_project.id, key)
+        if secret_key is None:
+            await _audit(success=False, detail="Unknown key")
+            raise HTTPException(status_code=404, detail="Not found")
+
+        env = await environments_service.get_environment(session, secret_key.environment_id)
+        if env.name.lower() != environment.lower():
+            await _audit(success=False, object_id=secret_key.id, detail="Environment mismatch")
+            raise HTTPException(status_code=404, detail="Not found")
+
+        try:
+            # updated_by=None: no UserAccount performed this — see nebula.secrets.set_value's
+            # docstring. rotation_frequency/rotation_unit are passed through UNCHANGED (the key's
+            # own current schedule, not cleared) — set_value's contract otherwise fully REPLACES the
+            # schedule on every call, and this machine route has no concept of rotation to offer, so
+            # blindly wiping an active one here would silently disable it out from under a caller
+            # that only meant to update a value.
+            await secrets_service.set_value(
+                session,
+                secret_key,
+                plaintext=payload.value,
+                updated_by=None,
+                rotation_frequency=secret_key.rotation_frequency,
+                rotation_unit=secret_key.rotation_unit,
+            )
+        except SecretKeyIsReferenceError:
+            await _audit(success=False, object_id=secret_key.id, detail="Key is a reference")
+            raise HTTPException(
+                status_code=409,
+                detail="This key's value can only be changed in its source project.",
+            )
+
+        await _audit(success=True, object_id=secret_key.id)
+        await _auto_sync_github(session, access_key, request, resolved_project.id)
+        return VaultSecretResponse(key=secret_key.name, environment=env.name, value=payload.value)
 
     async def get_status(
         self,

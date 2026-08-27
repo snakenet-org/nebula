@@ -7,14 +7,14 @@
   dynamically mounts every api/v1/*.py router at /api/v1/<stem>, and serves the built Vite frontend
   from the `public/` folder with SPA-style fallback (any non-/api path resolves to a real file in
   public/ or falls back to index.html so client-side routes deep-link correctly). Schema is managed
-  by Alembic (entrypoint.sh runs `alembic upgrade head` before this starts) — the lifespan only
-  seeds/validates idempotent bootstrap data, no DDL.
+  by Alembic (both entrypoint.lite.sh and entrypoint.aio.sh run `alembic upgrade head` before this
+  starts) — the lifespan only seeds/validates idempotent bootstrap data, no DDL.
 @ai-rules:
   - API routes must be registered before the SPA catch-all so /api/* always wins.
   - Never return raw passwords or secrets; never log secrets.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, uvicorn, loguru, sqlalchemy[asyncio]
-@version: 1.0.0
+@version: 1.0.1
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-05
 """

@@ -20,9 +20,12 @@
   /status), not just /secret — `api_requests` is every call regardless of outcome (success=None),
   `failed_attempts` is the success=False subset (any non-200 response), matching what
   list_failed_retrievals() lists row-by-row on the Audit Logs page.
-@version: 3.0.0
+  2026-08-27: added `certificate_count` (VariableType.CERTIFICATE, nebula.models.tables) alongside
+  variable_count/secret_count — same scope rules, so the three now partition every SecretKey in
+  scope instead of silently omitting certificates from the Dashboard.
+@version: 3.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-12
+@date: 2026-08-27
 """
 
 import uuid
@@ -56,6 +59,7 @@ async def summary_counts(
         ).scalar_one()
         variable_scope = [SecretKey.variable_type == VariableType.ENVIRONMENT]
         secret_scope = [SecretKey.variable_type == VariableType.SECRET]
+        certificate_scope = [SecretKey.variable_type == VariableType.CERTIFICATE]
     else:
         environment_count = (
             await session.execute(
@@ -73,6 +77,10 @@ async def summary_counts(
             SecretKey.variable_type == VariableType.SECRET,
             SecretKey.project_id.in_(project_ids),
         ]
+        certificate_scope = [
+            SecretKey.variable_type == VariableType.CERTIFICATE,
+            SecretKey.project_id.in_(project_ids),
+        ]
 
     variable_count = (
         await session.execute(select(func.count()).select_from(SecretKey).where(*variable_scope))
@@ -80,11 +88,15 @@ async def summary_counts(
     secret_count = (
         await session.execute(select(func.count()).select_from(SecretKey).where(*secret_scope))
     ).scalar_one()
+    certificate_count = (
+        await session.execute(select(func.count()).select_from(SecretKey).where(*certificate_scope))
+    ).scalar_one()
     return {
         "environment_count": environment_count,
         "project_count": project_count,
         "variable_count": variable_count,
         "secret_count": secret_count,
+        "certificate_count": certificate_count,
     }
 
 

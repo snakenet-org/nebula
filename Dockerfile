@@ -1,12 +1,18 @@
 #     (c) snakenet.org, All rights reserved
-#         Nebula Vault Dockerfile
+#         Nebula Vault Dockerfile — Lite (nebula) variant, the default
 #
 # Nebula Vault is a FastAPI/uvicorn service that serves both the JSON API and the built static SPA
-# portal (from /nebula/public). Unlike every sibling snakeNet app (Gravity/Satellite/Singularity),
-# this image bundles its OWN PostgreSQL 17 instance — Nebula Vault is meant to run as a single,
-# self-contained container with no external database dependency (see entrypoint.sh). TLS termination
-# + reverse proxying are still handled externally by Traefik. The Vue frontend is built in a
-# separate Node stage and copied into the final image.
+# portal (from /nebula/public). This is the "lite" image variant — the default, published as
+# `nebula` (and tagged `:latest`): it has NO embedded database, unlike the sibling `nebula-aio`
+# image (see Dockerfile.aio) — point NEBULA_POSTGRES_* at a PostgreSQL instance you already run.
+# This keeps the image small and lets it scale/back up independently of its database, at the cost
+# of needing that external Postgres yourself. TLS termination + reverse proxying are still handled
+# externally by Traefik. The Vue frontend is built in a separate Node stage and copied into the
+# final image.
+#
+# Both variants are built from the same source, versioned identically, and published under
+# different image names (`nebula` here, `nebula-aio` for the all-in-one variant); see
+# .github/workflows/build.yml.
 
 # ── Stage 1: build the Vite frontend ────────────────────────────────────────
 FROM node:22-alpine AS frontend
@@ -17,11 +23,10 @@ COPY frontend/ ./
 # Vite is configured to emit the production build into ../public (see vite.config.js).
 RUN npm run build
 
-# ── Stage 2: the Python API + embedded PostgreSQL 17 ────────────────────────
-# Debian, not Alpine (unlike every sibling app's uv base image): PostgreSQL 17 exact-version packages
-# come from the official PGDG apt repository, which only targets Debian/Ubuntu — Alpine has no PGDG
-# equivalent, and its own community repo tracks whichever PG version its release cycle bundles, not
-# necessarily 17.
+# ── Stage 2: the Python API only — no embedded PostgreSQL ───────────────────
+# Same Debian-based `uv` image as the all-in-one variant, for consistency between the two — this
+# variant doesn't strictly need Debian specifically (no PGDG apt package involved here), but sharing
+# a base image keeps behavior identical across both.
 FROM ghcr.io/astral-sh/uv:python3.14-bookworm-slim
 
 WORKDIR /nebula
@@ -32,43 +37,22 @@ ENV UV_COMPILE_BYTECODE=1 \
     TZ=Europe/Berlin \
     DEBIAN_FRONTEND=noninteractive \
     NEBULA_HOST=0.0.0.0 \
-    NEBULA_PORT=8000 \
-    NEBULA_DATA_FOLDER=/data \
-    PGDATA=/data/postgres \
-    PATH="/usr/lib/postgresql/17/bin:${PATH}"
+    NEBULA_PORT=8000
 
-# Install PostgreSQL 17 from the official PGDG apt repository, plus gosu — the standard technique the
-# official postgres Docker image itself uses to cleanly drop from root to the `postgres` system user
-# (created automatically by the postgresql-17 package) and back, since the app process runs as root
-# (for `uv`) while Postgres itself must run as a non-root user.
+# GitHub CLI (`gh`) — nebula.github_sync shells out to it for the Project "Sync to GitHub" feature;
+# installed from GitHub's own official apt repo, signed-repo pattern. No PostgreSQL server package
+# here at all — this image only ever speaks to Postgres over the network via asyncpg (a pure-Python
+# driver), so no `postgresql-client` is needed either.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ca-certificates tzdata curl gnupg gosu && \
-    install -d /usr/share/postgresql-common/pgdg && \
-    curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-      -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc && \
-    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
-      https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
-      > /etc/apt/sources.list.d/pgdg.list && \
-    # Suppress postgresql-common's own automatic "main" cluster at /var/lib/postgresql/17/main —
-    # entrypoint.sh creates its own cluster at $PGDATA (/data/postgres, a mounted volume) instead, so
-    # the package-managed default cluster would just be dead weight baked into every image layer.
-    mkdir -p /etc/postgresql-common && \
-    echo "create_main_cluster = false" > /etc/postgresql-common/createcluster.conf && \
-    # GitHub CLI (`gh`) — nebula.github_sync shells out to it for the Project "Sync to GitHub"
-    # feature; installed from GitHub's own official apt repo, same signed-repo pattern as PGDG above.
+      ca-certificates tzdata curl gnupg && \
     install -d /etc/apt/keyrings && \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
       -o /etc/apt/keyrings/githubcli-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] \
       https://cli.github.com/packages stable main" \
       > /etc/apt/sources.list.d/github-cli.list && \
-    apt-get update && apt-get install -y --no-install-recommends \
-      postgresql-17 postgresql-client-17 gh && \
+    apt-get update && apt-get install -y --no-install-recommends gh && \
     rm -rf /var/lib/apt/lists/*
-
-# The embedded Postgres data directory + Nebula's own data folder live here — see entrypoint.sh and
-# NEBULA_DATA_FOLDER. Mount this as a volume for durability across container recreation.
-RUN mkdir -p /data
 
 # Install Python dependencies first (cached layer) without building the project itself.
 COPY pyproject.toml uv.lock* ./
@@ -79,7 +63,7 @@ COPY main.py alembic.ini README.md ./
 COPY src/ src/
 COPY migrations/ migrations/
 COPY scripts/ scripts/
-COPY entrypoint.sh ./
+COPY entrypoint.lite.sh ./
 
 # Install the project itself now that the source is present.
 RUN uv sync --frozen --no-dev
@@ -87,10 +71,7 @@ RUN uv sync --frozen --no-dev
 # Bring in the built frontend from stage 1 (Vite emits to /public — outDir ../public from /build).
 COPY --from=frontend /public ./public
 
-# FastAPI/uvicorn listens here; Traefik proxies to this port. PostgreSQL never leaves the container
-# (entrypoint.sh binds it to 127.0.0.1 only) — no port is exposed for it here.
+# FastAPI/uvicorn listens here; Traefik proxies to this port.
 EXPOSE 8000
 
-VOLUME ["/data"]
-
-ENTRYPOINT ["sh", "./entrypoint.sh"]
+ENTRYPOINT ["sh", "./entrypoint.lite.sh"]

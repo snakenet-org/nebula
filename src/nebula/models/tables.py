@@ -44,9 +44,10 @@
   checked at startup — see nebula.crypto's module docstring and main.py's lifespan — to fail fast on
   a wrong NEBULA_MASTER_KEY instead of a confusing per-request 500 later).
   Since 2026-08-12 (later same day), a SecretKey also carries an optional automatic-rotation
-  schedule — `rotation_frequency` (a positive int) + `rotation_unit` (RotationUnit: week/month/year)
-  — and `last_rotated_at` (when its current value was put in place). See nebula.rotation for the
-  due-check/generation logic and scripts/rotate_secrets.py for the hourly process that acts on it.
+  schedule — `rotation_frequency` (a positive int) + `rotation_unit` (RotationUnit:
+  hour/day/week/month/year, hour/day added 2026-08-27) — and `last_rotated_at` (when its current
+  value was put in place). See nebula.rotation for the due-check/generation logic and
+  scripts/rotate_secrets.py for the hourly process that acts on it.
 @ai-rules:
   - `SecretKey.ciphertext`/`ProjectGithubSync.pat_ciphertext` must only ever be written via
     nebula.crypto.encrypt_value and read via nebula.crypto.decrypt_value — never assign/return raw.
@@ -61,9 +62,9 @@
     nebula.secrets.RotationNotSupportedError.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 6.2.0
+@version: 6.3.1
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-12
+@date: 2026-08-27
 """
 
 import enum
@@ -158,11 +159,20 @@ class ProjectShare(Base):
 class VariableType(str, enum.Enum):
     ENVIRONMENT = "environment"
     SECRET = "secret"
+    # A whole uploaded file (a PEM certificate/key, typically), stored/encrypted exactly like a
+    # SECRET's ciphertext — see nebula.secrets' module docstring. Masked/reveal-gated the same as a
+    # SECRET everywhere that distinguishes "anonymized" from ENVIRONMENT's always-visible value.
+    # Never eligible for automatic rotation (nebula.rotation/models/secret.py's validators both
+    # already exclude anything that isn't exactly SECRET) — a certificate can only be renewed by
+    # overwriting its value with a fresh upload.
+    CERTIFICATE = "certificate"
 
 
 class RotationUnit(str, enum.Enum):
     """The cadence unit for a SecretKey's automatic-rotation schedule — see nebula.rotation."""
 
+    HOUR = "hour"
+    DAY = "day"
     WEEK = "week"
     MONTH = "month"
     YEAR = "year"

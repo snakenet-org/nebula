@@ -9,11 +9,14 @@
   CRUD (including validating/storing the schedule fields themselves — see its
   RotationNotSupportedError) so this module only ever reads rotation_frequency/rotation_unit, never
   sets them.
-  Interval math is a fixed day-count approximation (week=7, month=30, year=365), not a calendar-exact
-  computation (e.g. via a proper relativedelta) — this app has no such dependency, and "every N
-  months" is already an inherently fuzzy product concept for something evaluated on an hourly tick;
-  being off by a day or two near a rotation boundary is an acceptable trade for not adding a new
-  dependency. is_due never fires for a reference key (source_key_id — it owns no value of its own,
+  Interval math is a fixed-length approximation per unit (hour=1h, day=1d, week=7d, month=30d,
+  year=365d — hour/day added 2026-08-27), not a calendar-exact computation (e.g. via a proper
+  relativedelta) — this app has no such dependency, and "every N months" is already an inherently
+  fuzzy product concept for something evaluated on an hourly tick; being off by a day or two near a
+  month/year rotation boundary is an acceptable trade for not adding a new dependency. hour/day are
+  exact (a fixed-length unit has no such fuzziness), and both remain meaningful against
+  scripts/rotate_secrets.py's own hourly tick — an HOUR-cadence key becomes due on the tick at or
+  after each full hour has elapsed. is_due never fires for a reference key (source_key_id — it owns no value of its own,
   see nebula.secrets' module docstring) or a non-SECRET key (rotation is a secret-only concept, see
   models/secret.py's validators) — both are also excluded from list_due_for_rotation's own query, so
   is_due's own re-check there is defense-in-depth, not the only guard.
@@ -30,9 +33,9 @@
   - encrypt_value only — never import `cryptography` directly here (see nebula.crypto).
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 1.0.0
+@version: 1.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-12
+@date: 2026-08-27
 """
 
 import secrets as pysecrets
@@ -49,11 +52,14 @@ from nebula.models.tables import RotationUnit, SecretKey, VariableType
 ROTATED_VALUE_LENGTH = 35
 _CHARSET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
 
-# Fixed day-count approximation per unit — see the module docstring for why this isn't calendar-exact.
-ROTATION_UNIT_DAYS: dict[RotationUnit, int] = {
-    RotationUnit.WEEK: 7,
-    RotationUnit.MONTH: 30,
-    RotationUnit.YEAR: 365,
+# Fixed-length approximation per unit — see the module docstring for why week/month/year aren't
+# calendar-exact (hour/day are exact, being fixed-length units themselves).
+ROTATION_UNIT_INTERVALS: dict[RotationUnit, timedelta] = {
+    RotationUnit.HOUR: timedelta(hours=1),
+    RotationUnit.DAY: timedelta(days=1),
+    RotationUnit.WEEK: timedelta(days=7),
+    RotationUnit.MONTH: timedelta(days=30),
+    RotationUnit.YEAR: timedelta(days=365),
 }
 
 
@@ -66,9 +72,7 @@ def rotation_interval(key: SecretKey) -> timedelta | None:
     """The configured rotation cadence as a timedelta, or None if rotation isn't enabled."""
     if key.rotation_frequency is None or key.rotation_unit is None:
         return None
-    return timedelta(
-        days=ROTATION_UNIT_DAYS[RotationUnit(key.rotation_unit)] * key.rotation_frequency
-    )
+    return ROTATION_UNIT_INTERVALS[RotationUnit(key.rotation_unit)] * key.rotation_frequency
 
 
 def is_due(key: SecretKey, *, now: datetime | None = None) -> bool:

@@ -44,9 +44,9 @@
   nebula.secrets.RotationNotSupportedError is the same rule enforced again server-side as a
   backstop. SecretKeyResponse exposes the schedule (+ `last_rotated_at`) as this row's OWN columns
   always, never resolved through a reference.
-@version: 5.0.0
+@version: 5.0.1
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-12
+@date: 2026-08-27
 """
 
 import uuid
@@ -74,7 +74,8 @@ class _RotationScheduleMixin(BaseModel):
     def _validate_rotation_pair(self) -> "_RotationScheduleMixin":
         if (self.rotation_frequency is None) != (self.rotation_unit is None):
             raise ValueError(
-                "Rotation needs both a frequency and a unit (weeks/months/years), or neither."
+                "Rotation needs both a frequency and a unit "
+                "(hours/days/weeks/months/years), or neither."
             )
         return self
 

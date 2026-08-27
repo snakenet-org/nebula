@@ -53,6 +53,11 @@
   the "has a value" check, rather than reading `key.ciphertext`/`key.variable_type` directly — a
   reference key syncs exactly like a normal key from here on, per explicit product requirement
   ("referenced keys should still be able to be synced to GitHub").
+  2026-08-27: `is_secret` (the `gh secret set` vs `gh variable set` branch) changed from
+  `variable_type == VariableType.SECRET` to `variable_type != VariableType.ENVIRONMENT`, so the new
+  VariableType.CERTIFICATE (nebula.models.tables) pushes via `gh secret set` — a certificate's
+  content is exactly as sensitive as a plain secret's, and only ENVIRONMENT was ever meant to be the
+  unmasked branch.
 @ai-rules:
   - Never pass a plaintext secret/PAT as a subprocess argv element — stdin only.
   - Never log a plaintext value, PAT, or full `gh` stderr verbatim if it could echo one back
@@ -64,9 +69,9 @@
     pat_ciphertext/pat_source_key_id set — raise InvalidPatConfigurationError instead.
   - Maintain 100% type-hinting coverage.
 @dependencies: nebula.crypto
-@version: 3.2.0
+@version: 3.3.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-09
+@date: 2026-08-27
 """
 
 import asyncio
@@ -360,7 +365,10 @@ async def sync_to_github(session: AsyncSession, target: ProjectGithubSync) -> di
         for key in env_keys:
             variable_type, ciphertext = effective[key.id]
             plaintext = decrypt_value(ciphertext)
-            is_secret = variable_type == VariableType.SECRET
+            # Anything that isn't an ENVIRONMENT variable is sensitive (SECRET and CERTIFICATE
+            # alike, both masked/reveal-gated identically in api/v1/secret.py) — push through
+            # `gh secret set`, never `gh variable set`.
+            is_secret = variable_type != VariableType.ENVIRONMENT
             verb = "secret" if is_secret else "variable"
             returncode, _stdout, stderr = await _run_gh(
                 [verb, "set", key.name, "--repo", f"{owner}/{repo}", "--env", environment.name],

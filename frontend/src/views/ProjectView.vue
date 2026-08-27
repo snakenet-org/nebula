@@ -185,9 +185,32 @@
     App.vue's same-day journal entry). Briefly four buttons the same day (Sharing was its own
     button) until Sharing and Access Management were merged back into one view/button per a
     same-day follow-up ask. Same visibility gate as before (owner/admin/editor), unchanged.
+    2026-08-27 (later same day): new "certificate" variable_type (nebula.models.tables.VariableType.
+    CERTIFICATE) — a third Type Select option everywhere secret/variable already appear (the New key
+    dialog's Type Select, both the bare-create-for-a-viewer variant and the direct-value tab).
+    Choosing it swaps the Value text Input for a hidden file `<input>` behind a "Choose a certificate
+    file…" Button (onNewKeyCertFileSelected/onEditingCertFileSelected) — the file is read as text
+    client-side (File.text()) and dropped straight into the same `newKey.value`/`editingValue` field
+    a typed secret value already occupies, so addKey()/saveValue() needed no payload-shape changes
+    at all; the API's `value` field was already generic text. The per-row "Set value" pencil button
+    is retitled "Upload certificate" for a certificate key and opens the same shared Dialog, now also
+    retitled and file-picker-based when `editingKey.variable_type === 'certificate'` — Save is
+    disabled until a file is actually chosen. The rotation section (both dialogs) was already gated
+    on `variable_type === 'secret'`, so it's excluded for a certificate for free — a certificate can
+    never auto-renew, only be replaced by uploading a fresh file (per explicit product spec). In the
+    table: the Value column shows "Certificate file" instead of a masked/inline value (a PEM block
+    doesn't read well as a table cell), the Eye/Reveal button is replaced by a Download button
+    (downloadCertificate — fetches the plaintext via the same revealSecretValue/can_reveal-gated
+    call as a secret and hands it to the browser as a file download named after the key), and the
+    Copy button is unchanged (still copies plaintext to the clipboard, works identically for any
+    non-environment type). New typeBadgeVariant/typeBadgeLabel helpers replace the previous inline
+    secret-vs-everything-else ternary so the type Badge reads "secret"/"var"/"cert" with a third
+    (success) color for a certificate. The "Upload .env" bulk-import flow's Type Select deliberately
+    still only offers secret/variable — a `.env` file's per-line text format has no sane way to
+    represent a whole certificate file's content, so bulk-importing one was never in scope.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, tooltip, checkbox, alert-dialog, dialog, skeleton)
-  @version: 9.3.0
+  @version: 9.4.1
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-27
 -->
@@ -276,6 +299,11 @@ const emptyNewKey = () => ({
   // Automatic-rotation schedule (nebula.rotation) — both blank means disabled. Kept as strings
   // (Select/number-input model values) and only coerced to a number / sent at all in addKey().
   rotation_frequency: '', rotation_unit: '',
+  // Display-only — the picked file's name, shown next to the "Choose a certificate file…" button
+  // when variable_type === 'certificate'. Never sent to the API; `value` (the file's text content,
+  // read via onNewKeyCertFileSelected) is what actually gets submitted, same field a plain secret's
+  // value already uses.
+  certificateFileName: '',
 });
 const newKey = ref(emptyNewKey());
 const savingKey = ref(false);
@@ -345,6 +373,22 @@ function resetNewKeyForm() {
 // fills the field; it stays freely editable afterward, same as typing a value by hand.
 function generateNewKeyValue() {
   newKey.value.value = generateSecurePassword(35);
+}
+
+// ── Certificate file upload ──────────────────────────────────────────────
+// A "certificate" key's value is a whole uploaded file's text content instead of a typed-in string
+// — read client-side via File.text() and dropped straight into the same `newKey.value.value` /
+// `editingValue` field a plain secret's typed value already occupies, so addKey()/saveValue() need
+// no branching at all: the API's `value` field is generic text either way (nebula.models.tables.
+// VariableType.CERTIFICATE, stored/encrypted through the exact same ciphertext column a secret
+// already uses).
+const newKeyCertFileInput = ref(null);
+async function onNewKeyCertFileSelected(event) {
+  const file = event.target.files?.[0];
+  event.target.value = ''; // allow re-selecting the same file to retrigger 'change'
+  if (!file) return;
+  newKey.value.value = await file.text();
+  newKey.value.certificateFileName = file.name;
 }
 
 async function addKey() {
@@ -615,6 +659,18 @@ async function saveRename() {
   }
 }
 
+// ── Type badge ────────────────────────────────────────────────────────────
+function typeBadgeVariant(variableType) {
+  if (variableType === 'secret') return 'warning';
+  if (variableType === 'certificate') return 'success';
+  return 'info';
+}
+function typeBadgeLabel(variableType) {
+  if (variableType === 'secret') return 'secret';
+  if (variableType === 'certificate') return 'cert';
+  return 'var';
+}
+
 // ── Reveal ────────────────────────────────────────────────────────────────
 const revealed = reactive({});
 async function toggleReveal(key) {
@@ -656,6 +712,28 @@ async function copyValue(key) {
   }
 }
 
+// ── Download certificate ─────────────────────────────────────────────────
+// The certificate equivalent of the Reveal/Copy buttons — a certificate's plaintext (its file's raw
+// text content) is always fetched fresh (never cached into `revealed`, unlike a secret) and handed
+// to the browser as a file download instead of rendered inline, since a PEM block is not something
+// that reads well as a single table-row line. revealSecretValue's own route already audit-logs this
+// as "secret.reveal" (can_reveal-gated, same permission bar a plain secret's reveal uses), so no
+// separate audit call is needed here.
+async function downloadCertificate(key) {
+  try {
+    const res = await api.revealSecretValue(props.projectId, key.id);
+    const blob = new Blob([res.value], { type: 'application/x-pem-file' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = key.name;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    toast.error(e.message);
+  }
+}
+
 // ── Set value ─────────────────────────────────────────────────────────────
 // A Dialog now, not an inline Popover — same shared-modal shape as the Edit-key dialog below
 // (openRenameDialog/renameTargetKey), so `editingKey` holds the whole row (needed to show its name/
@@ -670,9 +748,13 @@ const savingValue = ref(false);
 // submit (a full replace, not a partial patch) — clearing both fields disables rotation.
 const editingRotationFrequency = ref('');
 const editingRotationUnit = ref('');
+// Display-only file name for the certificate file picker — see newKey.certificateFileName above.
+const editingCertificateFileName = ref('');
+const editCertFileInput = ref(null);
 function openEditor(key) {
   editingKey.value = key;
   editingValue.value = '';
+  editingCertificateFileName.value = '';
   editingRotationFrequency.value = key.rotation_frequency ? String(key.rotation_frequency) : '';
   editingRotationUnit.value = key.rotation_unit || '';
   valueDialogOpen.value = true;
@@ -683,6 +765,14 @@ function closeEditor() {
 // Same convenience fill as the New key dialog's Generate button — see generateNewKeyValue.
 function generateEditingValue() {
   editingValue.value = generateSecurePassword(35);
+}
+// Same file-read shape as onNewKeyCertFileSelected — see the module comment there.
+async function onEditingCertFileSelected(event) {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  editingValue.value = await file.text();
+  editingCertificateFileName.value = file.name;
 }
 async function saveValue() {
   const target = editingKey.value;
@@ -841,8 +931,8 @@ async function saveValue() {
                     <TooltipContent>This key has never been extracted</TooltipContent>
                   </Tooltip>
                   <span class="font-mono font-semibold">{{ key.name }}</span>
-                  <Badge :variant="key.variable_type === 'secret' ? 'warning' : 'info'" class="text-[0.65rem] px-1.5 py-0">
-                    {{ key.variable_type === 'secret' ? 'secret' : 'var' }}
+                  <Badge :variant="typeBadgeVariant(key.variable_type)" class="text-[0.65rem] px-1.5 py-0">
+                    {{ typeBadgeLabel(key.variable_type) }}
                   </Badge>
                   <Badge v-if="key.source_key_id" variant="accent" class="text-[0.65rem] px-1.5 py-0">
                     <PhLink :size="10" weight="bold" /> reference
@@ -885,6 +975,9 @@ async function saveValue() {
                   <span v-if="!key.is_set" class="text-muted-foreground text-xs">—</span>
                   <!-- Variables are never anonymized — the value ships in the list response itself. -->
                   <span v-else-if="key.variable_type === 'environment'" class="font-mono">{{ key.value }}</span>
+                  <!-- A certificate's plaintext is a whole file — never rendered inline, only ever
+                       offered as a download (below). -->
+                  <span v-else-if="key.variable_type === 'certificate'" class="text-muted-foreground text-xs">Certificate file</span>
                   <span v-else-if="revealed[key.id] !== undefined" class="font-mono">{{ revealed[key.id] }}</span>
                   <span v-else class="secret-mask">••••••••</span>
 
@@ -897,6 +990,16 @@ async function saveValue() {
                   >
                     <PhEyeSlash v-if="revealed[key.id] !== undefined" :size="13" weight="bold" />
                     <PhEye v-else :size="13" weight="bold" />
+                  </Button>
+
+                  <Button
+                    v-if="canReveal && key.is_set && key.variable_type === 'certificate'"
+                    variant="ghost"
+                    size="icon-xs"
+                    title="Download certificate"
+                    @click="downloadCertificate(key)"
+                  >
+                    <PhDownload :size="13" weight="bold" />
                   </Button>
 
                   <Button
@@ -914,7 +1017,7 @@ async function saveValue() {
                     v-if="canEditValue && !key.source_key_id"
                     variant="ghost"
                     size="icon-xs"
-                    title="Set value"
+                    :title="key.variable_type === 'certificate' ? 'Upload certificate' : 'Set value'"
                     @click="openEditor(key)"
                   >
                     <PhPencilSimple :size="13" weight="bold" />
@@ -979,6 +1082,7 @@ async function saveValue() {
                 <SelectContent>
                   <SelectItem value="secret">Secret</SelectItem>
                   <SelectItem value="environment">Variable</SelectItem>
+                  <SelectItem value="certificate">Certificate</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -1001,10 +1105,11 @@ async function saveValue() {
                   <SelectContent>
                     <SelectItem value="secret">Secret</SelectItem>
                     <SelectItem value="environment">Variable</SelectItem>
+                    <SelectItem value="certificate">Certificate</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-              <div class="space-y-1.5">
+              <div v-if="newKey.variable_type !== 'certificate'" class="space-y-1.5">
                 <Label for="new-key-value">Value</Label>
                 <div class="relative">
                   <Input
@@ -1023,6 +1128,14 @@ async function saveValue() {
                   </button>
                 </div>
               </div>
+              <div v-else class="space-y-1.5">
+                <Label>Certificate file</Label>
+                <input ref="newKeyCertFileInput" type="file" class="hidden" @change="onNewKeyCertFileSelected" />
+                <Button type="button" variant="outline" class="w-full justify-start font-normal" @click="newKeyCertFileInput?.click()">
+                  <PhUpload :size="14" weight="bold" />
+                  <span class="truncate">{{ newKey.certificateFileName || 'Leave blank to upload later' }}</span>
+                </Button>
+              </div>
 
               <div v-if="newKey.variable_type === 'secret'" class="sm:col-span-2 space-y-1.5">
                 <Label for="new-key-rotation-frequency">Automatic rotation (optional)</Label>
@@ -1039,6 +1152,8 @@ async function saveValue() {
                   <Select v-model="newKey.rotation_unit">
                     <SelectTrigger class="flex-1"><SelectValue placeholder="Choose a unit" /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="hour">Hours</SelectItem>
+                      <SelectItem value="day">Days</SelectItem>
                       <SelectItem value="week">Weeks</SelectItem>
                       <SelectItem value="month">Months</SelectItem>
                       <SelectItem value="year">Years</SelectItem>
@@ -1211,11 +1326,11 @@ async function saveValue() {
     <Dialog :open="valueDialogOpen" @update:open="(v) => (valueDialogOpen = v)">
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Set value</DialogTitle>
+          <DialogTitle>{{ editingKey?.variable_type === 'certificate' ? 'Upload certificate' : 'Set value' }}</DialogTitle>
           <DialogDescription>{{ editingKey?.name }} — {{ editingKey?.environment_name }}</DialogDescription>
         </DialogHeader>
         <form @submit.prevent="saveValue" class="space-y-3">
-          <div class="space-y-1.5">
+          <div v-if="editingKey?.variable_type !== 'certificate'" class="space-y-1.5">
             <Label for="edit-value">Value</Label>
             <div class="relative">
               <Input
@@ -1235,6 +1350,17 @@ async function saveValue() {
               </button>
             </div>
           </div>
+          <div v-else class="space-y-1.5">
+            <Label>Certificate file</Label>
+            <input ref="editCertFileInput" type="file" class="hidden" @change="onEditingCertFileSelected" />
+            <Button type="button" variant="outline" class="w-full justify-start font-normal" @click="editCertFileInput?.click()">
+              <PhUpload :size="14" weight="bold" />
+              <span class="truncate">{{ editingCertificateFileName || 'Choose a certificate file…' }}</span>
+            </Button>
+            <p class="text-muted-foreground text-xs">
+              A certificate can't auto-renew — upload a new file here whenever it needs to be replaced.
+            </p>
+          </div>
           <div v-if="editingKey?.variable_type === 'secret'" class="space-y-1.5">
             <Label for="edit-rotation-frequency">Automatic rotation (optional)</Label>
             <div class="flex items-center gap-2">
@@ -1250,6 +1376,8 @@ async function saveValue() {
               <Select v-model="editingRotationUnit">
                 <SelectTrigger class="flex-1"><SelectValue placeholder="Choose a unit" /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="hour">Hours</SelectItem>
+                  <SelectItem value="day">Days</SelectItem>
                   <SelectItem value="week">Weeks</SelectItem>
                   <SelectItem value="month">Months</SelectItem>
                   <SelectItem value="year">Years</SelectItem>
@@ -1262,7 +1390,12 @@ async function saveValue() {
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" @click="valueDialogOpen = false">Cancel</Button>
-            <Button type="submit" :disabled="savingValue">Save</Button>
+            <Button
+              type="submit"
+              :disabled="savingValue || (editingKey?.variable_type === 'certificate' && !editingValue)"
+            >
+              Save
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

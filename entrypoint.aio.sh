@@ -1,11 +1,13 @@
 #!/bin/sh
 #
-#   snakeNet.org Nebula Vault Entrypoint
+#   snakeNet.org Nebula Vault Entrypoint — All-in-One (nebula-aio) variant
 #       Author: Marc Fiedler <marc@snakenet.org>
 #
 # Unlike every sibling app's entrypoint.sh, this one also owns the embedded PostgreSQL 17 instance's
-# entire lifecycle (init -> start -> stop) — see the Dockerfile's own header for why Nebula Vault
-# bundles its own database instead of depending on an external one.
+# entire lifecycle (init -> start -> stop) — see Dockerfile.aio's own header for why the all-in-one
+# image variant bundles its own database instead of depending on an external one. See the sibling
+# entrypoint.lite.sh (used by the default `Dockerfile`/`nebula` image) for the leaner variant that
+# skips all of this and talks to an external Postgres instead.
 set -e
 
 # Fail fast on the two required secrets — before touching Postgres at all, so a misconfigured

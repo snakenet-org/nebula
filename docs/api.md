@@ -13,8 +13,10 @@ X-Nebula-Token: <NEBULA_TOKEN>
 a site-wide shared secret set once when the container is spawned. It's the coarse "is this caller
 even allowed to talk to this Nebula Vault instance" gate, checked before anything else. The public
 routes (`/health`, `/ping`, `/config`, `/auth/*`) skip every *other* gate but still require this
-header. The `/vault/*` routes (`/vault/secret`, `/vault/project`, `/vault/status`) are the one
+header. The `/vault/*` routes (`GET /vault/secret`, `/vault/project`, `/vault/status`) are the one
 exception — they never require `X-Nebula-Token`, only a project access key (see below).
+`PUT /vault/secret` (changes a value) is a narrower exception to the exception: it requires **both**
+a project access key **and** `X-Nebula-Token`, since it writes rather than reads.
 
 Beyond that, three distinct credential kinds exist, and a route uses exactly one:
 
@@ -46,9 +48,10 @@ Authorization: Bearer nbv_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 
 A long-lived, Project-scoped credential generated from the UI (Project → Settings → API access
 keys). Identifies *which Project*, not *which user* — meant for scripts/CI/containers pulling
-secrets at deploy time, not for a human session. Required on **all three** `/vault/*` routes,
-including `/vault/status` — a plain liveness check still needs to present a valid key, it's just
-never scoped to the Project it happens to resolve.
+secrets at deploy time, not for a human session. Required on **every** `/vault/*` route, including
+`/vault/status` (a plain liveness check still needs to present a valid key, it's just never scoped
+to the Project it happens to resolve) and `PUT /vault/secret` (which also additionally requires
+`X-Nebula-Token` — see above).
 
 ---
 
@@ -142,6 +145,14 @@ or, to write the same value to every Environment the Project currently has:
 { "value": "dev@snakenet.org", "apply_to_all_environments": true }
 ```
 
+A key's `variable_type` is one of `secret` (anonymized, `can_reveal` required), `environment` (an
+environment variable — never anonymized, its value ships straight in the `GET /{project_id}` list
+response), or `certificate` (a whole uploaded file — e.g. a PEM certificate/key — anonymized and
+`can_reveal`-gated exactly like `secret`; the frontend's file picker just reads the file as text and
+sends it through the same `value` field a plain secret already uses). A certificate never rotates
+automatically — it can only be renewed by overwriting its value with a fresh upload, via this same
+`PUT .../value` route or `PUT /vault/secret` below.
+
 ## Access keys (`/access_key`) — human session required, owner/admin only
 
 | Method | Path | Notes |
@@ -150,10 +161,11 @@ or, to write the same value to every Environment the Project currently has:
 | POST | `/{project_id}` | `{"name": "deploy-bot"}` → includes the raw `token` **once**, never again. |
 | DELETE | `/{project_id}/{access_key_id}` | Revokes (soft — the row stays for audit, `revoked: true`). |
 
-## Vault (`/vault`) — no human session, no X-Nebula-Token
+## Vault (`/vault`) — no human session
 
-Every route below requires only a project access key (no `X-Nebula-Token`, no human JWT) — and
-every call, success or failure, is audit-logged (`nebula.audit`, actions `vault.retrieve` /
+Every `GET` route below requires only a project access key (no `X-Nebula-Token`, no human JWT).
+`PUT /vault/secret` additionally requires `X-Nebula-Token` — see Authentication above. Every call,
+success or failure, is audit-logged (`nebula.audit`, actions `vault.retrieve` / `vault.update` /
 `vault.project` / `vault.status`) and rolled up into the Dashboard's "API requests / day" and
 "Failed attempts / day" charts.
 
@@ -170,6 +182,28 @@ enumerate a Project's key names by probing.
 ```json
 { "key": "DATABASE_URL", "environment": "production", "value": "postgres://..." }
 ```
+
+### `PUT /vault/secret?key=<name>&environment=<name>`
+
+Changes the value of an **existing** secret, variable, or certificate key — never creates one (same
+404-on-any-lookup-miss shape as the `GET` route above). Requires **both** a project access key and
+`X-Nebula-Token`:
+
+```
+Authorization: Bearer nbv_...
+X-Nebula-Token: <NEBULA_TOKEN>
+```
+
+```json
+{ "value": "postgres://..." }
+```
+
+→ `200` with the same shape as `GET /vault/secret`. Works identically regardless of the key's type —
+a certificate's "value" is just its file's raw text content (e.g. a PEM-encoded certificate/key),
+stored encrypted the same way a plain secret's value already is. A key that's a reference to another
+key's value (see the Secrets section below) can't be changed here either — `409`, same as the human
+API — its value can only be changed by editing the source key, in its own Project. Audited as
+`vault.update`.
 
 ### `GET /vault/project`
 

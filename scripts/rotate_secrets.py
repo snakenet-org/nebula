@@ -5,8 +5,9 @@
   its value with a fresh 35-character secure random secret.
 @ai-context: A separate OS process, not an asyncio task inside main.py's uvicorn process — mirrors
   Gravity's own scheduler.py (a sibling snakeNet app with the same "don't let a background loop's
-  crash/hang take the API down with it" reasoning), started alongside main.py by entrypoint.sh and
-  killed by its shutdown trap. Uses nebula.database.async_session_factory directly (no FastAPI
+  crash/hang take the API down with it" reasoning), started alongside main.py by either image's
+  entrypoint script (entrypoint.lite.sh or entrypoint.aio.sh) and killed by its shutdown trap. Uses
+  nebula.database.async_session_factory directly (no FastAPI
   Depends, no Request) since nothing here runs inside a request. The actual due-check/regeneration
   logic lives in nebula.rotation (list_due_for_rotation/rotate_key) — this script is only the
   tick-every-hour loop plus the audit-logging/GitHub-sync fan-out around each rotation.
@@ -28,9 +29,9 @@
     docstring above.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio], loguru
-@version: 1.0.0
+@version: 1.0.1
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-12
+@date: 2026-08-27
 """
 
 import asyncio

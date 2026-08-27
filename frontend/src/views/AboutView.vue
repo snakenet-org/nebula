@@ -1,7 +1,13 @@
 <!--
   @ai-purpose: About page — what Nebula is, what it excels at, links out to snakenet.org/GitHub, sign-in identity.
+  @ai-context: 2026-08-27: added three highlights alongside the existing six — Certificate storage
+    (the new VariableType.CERTIFICATE, see nebula.models.tables/ProjectView.vue), a mention of the
+    sibling nebula-cli project (a standalone Go binary that talks to /api/v1/vault/* using a
+    project's access key), and a note on OIDC provider flexibility (any standards-compliant provider
+    — Authentik, AWS IAM Identity Center, Microsoft Entra ID — works via api/endpoint.py's generic
+    JWKS-based RS256 validation, not just Authentik specifically).
   @dependencies: vue, shadcn-vue (card, badge), @phosphor-icons/vue
-  @version: 3.0.0
+  @version: 3.1.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-27
 -->
@@ -43,6 +49,21 @@ const highlights = [
     title: 'Automatic rotation',
     description:
       'Give any secret a rotation schedule and it regenerates itself on time, fanning out to every connected repository with no manual intervention.',
+  },
+  {
+    title: 'Certificate storage',
+    description:
+      "Upload a certificate file — a private key, a PEM chain, anything — and Nebula stores and encrypts it exactly like any other secret. Certificates never auto-renew; overwrite one with a fresh upload to replace it, from the UI or the REST API.",
+  },
+  {
+    title: 'A CLI for your pipelines',
+    description:
+      'nebula-cli is a small, single-binary command-line client — link a project with its access key and pull secrets, variables, and certificates straight into a deploy script or CI job.',
+  },
+  {
+    title: 'Bring your own identity provider',
+    description:
+      'Sign in through any standards-compliant OIDC provider — Authentik, AWS IAM Identity Center, Microsoft Entra ID, or your own — instead of being locked into one.',
   },
 ];
 </script>

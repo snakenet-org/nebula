@@ -4,19 +4,19 @@
 @ai-context: Wires Alembic to the application's SQLAlchemy metadata (nebula.database.Base, with all
   ORM tables imported from nebula.models.tables) and reuses nebula.config.settings for the async
   asyncpg connection URL — same source of truth the app itself connects with. Used by
-  `alembic revision --autogenerate` and `alembic upgrade head` (run from entrypoint.sh on start).
-  `_ensure_database_exists()` runs first, connecting to the `postgres` maintenance database to
-  `CREATE DATABASE` settings.pg_db if it's not there yet — the shipped Docker image's entrypoint.sh
-  already handles this itself for its embedded Postgres (a first-boot `createdb` before `alembic
-  upgrade head`), but `alembic upgrade head` run directly against an external/local Postgres (see
-  docs/deployment.md's "Building from source" section) has no equivalent, so it always failed on a
-  brand-new server with no NEBULA_POSTGRES_DB database yet — this makes alembic self-sufficient
-  either way.
+  `alembic revision --autogenerate` and `alembic upgrade head` (run from entrypoint.lite.sh/
+  entrypoint.aio.sh on start). `_ensure_database_exists()` runs first, connecting to the `postgres`
+  maintenance database to `CREATE DATABASE` settings.pg_db if it's not there yet — the `nebula-aio`
+  image's entrypoint.aio.sh already handles this itself for its embedded Postgres (a first-boot
+  `createdb` before `alembic upgrade head`), but the `nebula` (lite) image's external Postgres, and
+  `alembic upgrade head` run directly against a local Postgres (see docs/deployment.md's "Building
+  from source" section), have no equivalent, so it always failed on a brand-new server with no
+  NEBULA_POSTGRES_DB database yet — this makes alembic self-sufficient either way.
 @ai-rules:
   - Never expose raw DB credentials in logs or API responses.
   - Maintain 100% type-hinting coverage.
 @dependencies: alembic, sqlalchemy[asyncio], asyncpg, python-dotenv
-@version: 1.1.0
+@version: 1.1.1
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-06
 """
