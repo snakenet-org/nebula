@@ -75,7 +75,7 @@
     the flat edge-on disk (`bh-disk-grad` + `diskStreamlines`), the Doppler-beaming overlay, the
     photon ring, and the event horizon are unchanged and were confirmed to already look right.
   @dependencies: vue, vue-sonner, shadcn-vue (card, input, label, button)
-  @version: 5.1.0
+  @version: 5.1.1
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-12
 -->
@@ -261,7 +261,7 @@ async function oidcLogin() {
           <h1 class="text-2xl font-bold flex items-center gap-2">
             <img src="/favicon.png" alt="" width="26" height="26" class="rounded-md" /> Nebula Vault
           </h1>
-          <p class="text-muted-foreground text-sm mt-1">A self-hosted secrets manager for snakeNet.org</p>
+          <p class="text-muted-foreground text-sm mt-1">Secure, self-hosted secrets management</p>
         </div>
 
         <form v-if="!config.config.basicLoginDisabled" @submit.prevent="submit" class="space-y-3">

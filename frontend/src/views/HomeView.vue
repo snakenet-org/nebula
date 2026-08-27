@@ -1,16 +1,28 @@
 <!--
   @ai-purpose: Home — the logged-in caller's project list + create-project form.
   @ai-context: listProjects() already scopes to what the caller may see (owned + shared, or every
-    project for an admin — see nebula.projects.list_projects) so this view does no client-side
-    filtering. my_role badge (owner/admin/editor/viewer) is rendered straight from the API response.
-    "New project" is a modal Dialog (2026-08-12 — previously an inline toggled form under the header
-    button; switched for consistency with every other "create" action in the app, which are all
-    modals now). Built from shadcn-vue Card/Badge/Button/Input/Label/Dialog/Skeleton.
+    project for an admin — see nebula.projects.list_projects) so this view does no server round-trip
+    for filtering/search, both are client-side over that one response. my_role badge
+    (owner/admin/editor/viewer) is rendered straight from the API response. "New project" is a modal
+    Dialog (2026-08-12 — previously an inline toggled form under the header button; switched for
+    consistency with every other "create" action in the app, which are all modals now).
+    **2026-08-27**: added an All/Owned/Shared role-filter Tabs control next to the search Input — both
+    together now span the page's full width (was a lone `max-w-sm` search bar). "Owned" is
+    `my_role === 'owner'`; "Shared" is everything else (admin/editor/viewer) — i.e. a project the
+    caller sees but did not themselves create, which is the plain-language meaning of "shared" from
+    the caller's own point of view, admin's system-wide visibility included. Also reworked the project
+    grid's visual language: each card gets a small deterministic "nebula hue" derived from its own id
+    (`projectHue`, a cheap string hash % the app's 4 brand colors — cyan/magenta/gold/flare, the same
+    tokens `style.css`/`components/ui/button` already use) so cards read as visually distinct from one
+    another at a glance, subtly, via a blurred corner glow (opacity ~0.14, brightens slightly on
+    hover), a hairline top gradient filament, and a tinted initial-letter avatar — no per-project data
+    drives the color (there's no "project color" field), it's purely a stable presentational hash so
+    the same project always gets the same hue across reloads.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input, label,
-    dialog, skeleton)
-  @version: 3.0.1
+    dialog, skeleton, tabs)
+  @version: 3.1.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-12
+  @date: 2026-08-27
 -->
 <script setup>
 import { computed, onMounted, ref } from 'vue';
@@ -23,6 +35,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import * as api from '../services/api';
 
 const emit = defineEmits(['navigate']);
@@ -33,16 +46,32 @@ const createDialogOpen = ref(false);
 const creating = ref(false);
 const form = ref({ name: '', description: '' });
 
-// ── Search ────────────────────────────────────────────────────────────────
-// Client-side only — listProjects() already returns the caller's full visible set in one call, so
-// there's no reason to round-trip to the API on every keystroke.
+// ── Filter + search ──────────────────────────────────────────────────────
+// Both client-side only — listProjects() already returns the caller's full visible set in one call,
+// so there's no reason to round-trip to the API for either.
+const roleFilter = ref('all');
+const ownedCount = computed(() => projects.value.filter((p) => p.my_role === 'owner').length);
+const sharedCount = computed(() => projects.value.length - ownedCount.value);
+const roleFiltered = computed(() => {
+  if (roleFilter.value === 'owned') return projects.value.filter((p) => p.my_role === 'owner');
+  if (roleFilter.value === 'shared') return projects.value.filter((p) => p.my_role !== 'owner');
+  return projects.value;
+});
+
 const search = ref('');
 const filteredProjects = computed(() => {
   const q = search.value.trim().toLowerCase();
-  if (!q) return projects.value;
-  return projects.value.filter(
+  if (!q) return roleFiltered.value;
+  return roleFiltered.value.filter(
     (p) => p.name.toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q)
   );
+});
+
+const emptyMessage = computed(() => {
+  if (search.value.trim()) return `No projects match "${search.value.trim()}".`;
+  if (roleFilter.value === 'owned') return "You don't own any projects yet.";
+  if (roleFilter.value === 'shared') return 'No projects have been shared with you yet.';
+  return 'No projects match the current filter.';
 });
 
 async function load() {
@@ -83,6 +112,22 @@ const roleVariant = {
   editor: 'success',
   viewer: 'warning',
 };
+
+// ── Per-project nebula hue ───────────────────────────────────────────────
+// A cheap, stable hash of the project's own id, purely presentational — picks one of the app's 4
+// brand tokens so cards read as visually distinct at a glance without inventing a real "color" field.
+const NEBULA_HUE_VARS = ['--primary', '--magenta', '--gold', '--flare'];
+function hashString(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+  return Math.abs(h);
+}
+function projectHue(p) {
+  return `var(${NEBULA_HUE_VARS[hashString(p.id) % NEBULA_HUE_VARS.length]})`;
+}
+function initials(name) {
+  return (name || '').trim().slice(0, 1).toUpperCase() || '?';
+}
 </script>
 
 <template>
@@ -112,23 +157,32 @@ const roleVariant = {
     </Card>
 
     <template v-else>
-      <div class="relative mb-4 max-w-sm">
-        <PhMagnifyingGlass :size="14" weight="bold" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <Input v-model="search" placeholder="Search projects…" class="pl-7 pr-7" />
-        <button
-          v-if="search"
-          type="button"
-          title="Clear search"
-          class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-          @click="search = ''"
-        >
-          <PhX :size="14" weight="bold" />
-        </button>
+      <div class="flex items-center gap-3 mb-4 w-full">
+        <Tabs :model-value="roleFilter" @update:model-value="(v) => (roleFilter = v)" class="shrink-0">
+          <TabsList>
+            <TabsTrigger value="all">All <span class="text-muted-foreground">{{ projects.length }}</span></TabsTrigger>
+            <TabsTrigger value="owned">Owned <span class="text-muted-foreground">{{ ownedCount }}</span></TabsTrigger>
+            <TabsTrigger value="shared">Shared <span class="text-muted-foreground">{{ sharedCount }}</span></TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div class="relative flex-1 min-w-0">
+          <PhMagnifyingGlass :size="14" weight="bold" class="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input v-model="search" placeholder="Search projects…" class="pl-7 pr-7" />
+          <button
+            v-if="search"
+            type="button"
+            title="Clear search"
+            class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            @click="search = ''"
+          >
+            <PhX :size="14" weight="bold" />
+          </button>
+        </div>
       </div>
 
       <Card v-if="!filteredProjects.length">
         <CardContent class="p-10 text-center text-muted-foreground text-sm">
-          No projects match "{{ search }}".
+          {{ emptyMessage }}
         </CardContent>
       </Card>
 
@@ -136,12 +190,28 @@ const roleVariant = {
         <Card
           v-for="p in filteredProjects"
           :key="p.id"
-          class="text-left cursor-pointer transition hover:border-primary/40"
+          class="group relative text-left cursor-pointer transition hover:-translate-y-0.5 hover:border-foreground/20"
           @click="emit('navigate', `/projects/${p.id}`)"
         >
-          <CardContent>
-            <div class="flex items-start justify-between gap-2 mb-2">
-              <h2 class="font-semibold">{{ p.name }}</h2>
+          <div
+            class="pointer-events-none absolute -top-12 -right-12 h-36 w-36 rounded-full opacity-[0.14] blur-3xl transition-opacity duration-300 group-hover:opacity-25"
+            :style="{ background: projectHue(p) }"
+          />
+          <div
+            class="pointer-events-none absolute inset-x-0 top-0 h-px opacity-50"
+            :style="{ background: `linear-gradient(90deg, transparent, ${projectHue(p)}, transparent)` }"
+          />
+          <CardContent class="relative">
+            <div class="flex items-start gap-3 mb-2">
+              <div
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold"
+                :style="{ background: `color-mix(in oklab, ${projectHue(p)} 18%, transparent)`, color: projectHue(p) }"
+              >
+                {{ initials(p.name) }}
+              </div>
+              <div class="min-w-0 flex-1 pt-1">
+                <h2 class="font-semibold truncate">{{ p.name }}</h2>
+              </div>
               <Badge :variant="roleVariant[p.my_role] || 'default'">{{ p.my_role }}</Badge>
             </div>
             <p v-if="p.description" class="text-muted-foreground text-sm mb-3 line-clamp-2">{{ p.description }}</p>

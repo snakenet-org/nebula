@@ -94,27 +94,42 @@ banner with a brand hue — mixing brand color into a state signal makes it unre
 
 ### 1.5 Radius scale
 
-One base token, three derived sizes, all defined once:
+**One radius, used everywhere.** All four derived tokens equal the base token — there is no
+size-graded scale anymore:
 
 ```
---radius:    0.85rem                          (≈13.6px)
---radius-sm: calc(var(--radius) - 4px)         (≈9.6px)
---radius-md: calc(var(--radius) - 2px)         (≈11.6px)
---radius-lg: var(--radius)                     (≈13.6px)
---radius-xl: calc(var(--radius) + 4px)         (≈17.6px)
+--radius:    0.375rem   (6px)
+--radius-sm: var(--radius)
+--radius-md: var(--radius)
+--radius-lg: var(--radius)
+--radius-xl: var(--radius)
 ```
 
-Mapping (do not deviate — pick the class for what you're building, not an arbitrary radius):
+Previously this was a four-step scale (~9.6px on Tooltip up to ~17.6px on Card/Dialog, largest on
+the outermost surface, smallest on the smallest element) — deliberately flattened and shrunk to a
+single minimal ~6px radius: a smaller, professional/modern look, and so no two surfaces in the app
+ever read as "differently rounded" purely because one happens to be a Card and another a Button.
+**If you ever touch this token again, change `--radius` alone and keep all four derived tokens
+equal to it — do not reintroduce per-size offsets.**
+
+Mapping (unchanged — pick the class for what you're building; they all resolve to the same 6px now,
+the choice is only about which existing convention to follow, not about picking a size):
 
 | Element | Tailwind class | Resolves to |
 |---|---|---|
-| Card, Dialog, AlertDialog panel | `rounded-xl` | `--radius-xl` (largest — the outermost surface) |
+| Card, Dialog, AlertDialog panel | `rounded-xl` | `--radius-xl` |
 | Button, Input, Textarea, Select trigger, Select content | `rounded-lg` | `--radius-lg` |
+| Tabs segmented-control track / trigger | `rounded-lg` / `rounded-md` | `--radius-lg` / `--radius-md` |
 | Tooltip content | `rounded-md` | `--radius-md` |
-| `xs`/`sm` Button sizes | `rounded-[min(var(--radius-md),10px)]` / `12px` | capped smaller so a tiny button doesn't look over-rounded |
+
+The only exceptions are elements that are deliberately circular or pill-shaped — a different shape
+concept entirely, not a "corner radius" in the sense above, so this flattening doesn't touch them:
+
+| Element | Tailwind class | Why it's different |
+|---|---|---|
 | Badge | `rounded-4xl` | fully pill-shaped (height is only 20px, so any radius ≥10px pills it) |
 | Checkbox | `rounded-[4px]` | fixed, deliberately small — it's a checkbox, not a chip |
-| Switch / avatar | `rounded-full` | circular |
+| Switch / avatar / slider thumb+track | `rounded-full` | circular |
 
 ### 1.6 Glass / elevation
 

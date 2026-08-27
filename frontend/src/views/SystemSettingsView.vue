@@ -23,7 +23,7 @@
     supported round-trip (POST /system/import accepts the exact VaultExport shape GET /system/export
     returns).
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, button, alert-dialog)
-  @version: 1.0.0
+  @version: 1.1.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-13
 -->
@@ -173,6 +173,59 @@ async function runImport() {
 
     <template v-if="isAdmin">
       <div class="space-y-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <Card class="border-warning/30">
+            <CardContent>
+              <h2 class="font-semibold mb-1 text-warning flex items-center gap-2">
+                <PhUploadSimple :size="18" weight="bold" /> Import vault
+              </h2>
+              <p class="text-muted-foreground text-sm mb-4">
+                Restores a full vault export — environments, projects, keys, secrets, and variables,
+                with all their settings — from a JSON file produced by Export vault. Every imported
+                project is created brand-new and owned by <strong>you</strong>, regardless of who
+                owned it in the original export. Existing projects are never modified or removed.
+              </p>
+              <input
+                ref="importFileInput"
+                type="file"
+                accept="application/json,.json"
+                class="hidden"
+                @change="onImportFileSelected"
+              />
+              <div class="flex items-center gap-2 flex-wrap">
+                <Button type="button" variant="outline" :disabled="importing" @click="pickImportFile">
+                  Choose file…
+                </Button>
+                <span v-if="importFile" class="text-sm text-muted-foreground font-mono">{{ importFile.name }}</span>
+                <Button
+                  type="button"
+                  variant="warning"
+                  :disabled="!importFile || importing"
+                  @click="confirmImport = true"
+                >
+                  <PhUploadSimple :size="16" weight="bold" /> Import
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card class="border-warning/30">
+            <CardContent>
+              <h2 class="font-semibold mb-1 text-warning flex items-center gap-2">
+                <PhDownloadSimple :size="18" weight="bold" /> Export vault
+              </h2>
+              <p class="text-muted-foreground text-sm mb-4">
+                Downloads a full backup of every environment, project, key, secret, and variable — with
+                all their settings — as a JSON file. <strong>The file contains decrypted, plaintext
+                secret values</strong> — store and transmit it as carefully as the secrets themselves.
+              </p>
+              <Button type="button" variant="warning" :disabled="exporting" @click="exportVault">
+                <PhDownloadSimple :size="16" weight="bold" /> Export vault
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+
         <Card class="border-destructive/30">
           <CardContent>
             <h2 class="font-semibold mb-1 text-destructive flex items-center gap-2">
@@ -201,57 +254,6 @@ async function runImport() {
             </p>
             <Button variant="destructive" :disabled="resettingLogs" @click="confirmResetLogs = true">
               <PhTrash :size="16" weight="bold" /> Clear audit logs
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Card class="border-warning/30">
-          <CardContent>
-            <h2 class="font-semibold mb-1 text-warning flex items-center gap-2">
-              <PhUploadSimple :size="18" weight="bold" /> Import vault
-            </h2>
-            <p class="text-muted-foreground text-sm mb-4">
-              Restores a full vault export — environments, projects, keys, secrets, and variables,
-              with all their settings — from a JSON file produced by Export vault below. Every
-              imported project is created brand-new and owned by <strong>you</strong>, regardless of
-              who owned it in the original export. Existing projects are never modified or removed.
-            </p>
-            <input
-              ref="importFileInput"
-              type="file"
-              accept="application/json,.json"
-              class="hidden"
-              @change="onImportFileSelected"
-            />
-            <div class="flex items-center gap-2 flex-wrap">
-              <Button type="button" variant="outline" :disabled="importing" @click="pickImportFile">
-                Choose file…
-              </Button>
-              <span v-if="importFile" class="text-sm text-muted-foreground font-mono">{{ importFile.name }}</span>
-              <Button
-                type="button"
-                variant="warning"
-                :disabled="!importFile || importing"
-                @click="confirmImport = true"
-              >
-                <PhUploadSimple :size="16" weight="bold" /> Import
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card class="border-warning/30">
-          <CardContent>
-            <h2 class="font-semibold mb-1 text-warning flex items-center gap-2">
-              <PhDownloadSimple :size="18" weight="bold" /> Export vault
-            </h2>
-            <p class="text-muted-foreground text-sm mb-4">
-              Downloads a full backup of every environment, project, key, secret, and variable — with
-              all their settings — as a JSON file. <strong>The file contains decrypted, plaintext
-              secret values</strong> — store and transmit it as carefully as the secrets themselves.
-            </p>
-            <Button type="button" variant="warning" :disabled="exporting" @click="exportVault">
-              <PhDownloadSimple :size="16" weight="bold" /> Export vault
             </Button>
           </CardContent>
         </Card>
