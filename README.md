@@ -2,7 +2,7 @@
 
 # 🌌 Nebula Vault
 
-**A self-hosted secrets manager for snakeNet.org.**
+**A self-hosted secrets and certificate manager with a built-in MCP server.**
 
 </div>
 
@@ -75,6 +75,37 @@ curl "https://your-nebula-host/api/v1/vault/secret?key=DATABASE_URL&environment=
 ```
 
 Full route reference: [docs/api.md](docs/api.md).
+
+## The built-in MCP server (for LLM clients)
+
+Nebula Vault runs its own [Model Context Protocol](https://modelcontextprotocol.io) server
+alongside the REST API, mounted at `/mcp` — point any MCP-speaking model or agent at it and it can
+read, find, and change secrets, environment variables, and certificates directly, with no separate
+integration to write.
+
+Authentication reuses the same **project access keys** the REST API uses — no new credential kind
+to manage. A single MCP connection can even present **more than one** access key at once (comma-
+separated in the bearer token), giving that one connection scoped access to several specific
+Projects simultaneously:
+
+```json
+{
+  "mcpServers": {
+    "nebula-vault": {
+      "url": "https://your-nebula-host/mcp",
+      "headers": {
+        "Authorization": "Bearer nbv_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+      }
+    }
+  }
+}
+```
+
+Five tools are exposed: `list_projects` and `list_environments` for discovery, `find_secrets` to
+search a Project's keys by name/type/environment (never returning a secret or certificate's
+plaintext — only an environment variable's value, which is never masked), `read_secret` to reveal
+one key's plaintext, and `set_secret_value` to change an *existing* key's value (it never creates
+one). Every call is audit-logged, exactly like every other write and every REST retrieval.
 
 ## Running it
 

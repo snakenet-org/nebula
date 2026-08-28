@@ -1,22 +1,28 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: Nebula Vault FastAPI entry point — serves the JSON API and the built static SPA portal.
+@ai-purpose: Nebula Vault FastAPI entry point — serves the JSON API, the built-in MCP server, and
+  the built static SPA portal.
 @ai-context: Boots the FastAPI app, wires CORS + a global Server header, seeds the optional local
   bootstrap admin, checks the NEBULA_MASTER_KEY canary (nebula.crypto/models.tables.VaultMeta —
   fails startup loudly on a wrong key instead of a confusing per-request decrypt error later),
-  dynamically mounts every api/v1/*.py router at /api/v1/<stem>, and serves the built Vite frontend
-  from the `public/` folder with SPA-style fallback (any non-/api path resolves to a real file in
-  public/ or falls back to index.html so client-side routes deep-link correctly). Schema is managed
-  by Alembic (both entrypoint.lite.sh and entrypoint.aio.sh run `alembic upgrade head` before this
-  starts) — the lifespan only seeds/validates idempotent bootstrap data, no DDL.
+  dynamically mounts every api/v1/*.py router at /api/v1/<stem>, mounts the built-in MCP (Model
+  Context Protocol) server (nebula.mcp_server) at /mcp so LLM clients can read/find/change secrets
+  using one or more project access keys, and serves the built Vite frontend from the `public/`
+  folder with SPA-style fallback (any non-/api, non-/mcp path resolves to a real file in public/ or
+  falls back to index.html so client-side routes deep-link correctly). Schema is managed by Alembic
+  (both entrypoint.lite.sh and entrypoint.aio.sh run `alembic upgrade head` before this starts) —
+  the lifespan only seeds/validates idempotent bootstrap data, no DDL; combine_lifespans() merges
+  that with the MCP app's own required lifespan (its streamable-HTTP session manager never
+  initializes otherwise — same shape Satellite's own main.py already uses for its mcp_server).
 @ai-rules:
-  - API routes must be registered before the SPA catch-all so /api/* always wins.
+  - API routes and the MCP mount must be registered before the SPA catch-all so /api/* and /mcp
+    always win.
   - Never return raw passwords or secrets; never log secrets.
   - Maintain 100% type-hinting coverage.
-@dependencies: fastapi, uvicorn, loguru, sqlalchemy[asyncio]
-@version: 1.0.1
+@dependencies: fastapi, uvicorn, loguru, sqlalchemy[asyncio], fastmcp
+@version: 2.0.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-05
+@date: 2026-08-28
 """
 
 import importlib
@@ -28,12 +34,14 @@ from typing import AsyncGenerator
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastmcp.utilities.lifespan import combine_lifespans
 from loguru import logger
 
 from nebula import version
 from nebula.config import settings
+from nebula.mcp_server import mcp
 
 # Replace loguru's default (unfiltered) sink with one gated by settings.log_level, before any other
 # module's import-time/startup logging can fire.
@@ -42,6 +50,10 @@ logger.add(sys.stderr, level=settings.log_level)
 
 # Directory holding the built Vite frontend (served as the SPA). Created by `npm run build`.
 PUBLIC_DIR = Path(__file__).parent / "public"
+
+# The MCP endpoint's own ASGI app (path="/" so mounting it at "/mcp" below lands the endpoint at
+# exactly /mcp, not /mcp/mcp — see nebula.mcp_server's module docstring for the auth model).
+mcp_app = mcp.http_app(path="/")
 
 
 async def _seed_admin() -> None:
@@ -122,7 +134,7 @@ app = FastAPI(
     title="Nebula Vault API",
     version=version,
     description="Self-hosted secrets manager for snakeNet.org.",
-    lifespan=lifespan,
+    lifespan=combine_lifespans(lifespan, mcp_app.lifespan),
 )
 
 # CORS: the SPA is served same-origin in production; localhost:5173 is the Vite dev server.
@@ -135,7 +147,14 @@ app.add_middleware(
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["Authorization", "X-Nebula-Token", "Content-Type"],
+    allow_headers=[
+        "Authorization",
+        "X-Nebula-Token",
+        "Content-Type",
+        "Mcp-Session-Id",
+        "Mcp-Protocol-Version",
+    ],
+    expose_headers=["Mcp-Session-Id"],
 )
 
 
@@ -167,6 +186,22 @@ def load_routers(api_version: str = "v1") -> None:
 
 # Mount the API first so /api/* always takes precedence over the SPA fallback.
 load_routers("v1")
+
+# The built-in MCP server (see nebula.mcp_server) — mounted before the SPA catch-all so /mcp always
+# reaches it rather than the client-routed frontend shell.
+app.mount("/mcp", mcp_app)
+
+
+@app.api_route("/mcp", methods=["GET", "POST", "DELETE", "HEAD"], include_in_schema=False)
+async def mcp_trailing_slash_redirect(request: Request) -> RedirectResponse:
+    """Bounce the bare /mcp (no trailing slash) to /mcp/.
+
+    Starlette's Mount only matches a request path that is its prefix *plus* a following "/" — the
+    bare prefix alone never reaches mcp_app, and without this route it would instead fall through
+    to the SPA catch-all below (wrong method there for anything but GET, hence a confusing 405).
+    307 preserves the original method and body, so POST clients hitting exactly "/mcp" still work.
+    """
+    return RedirectResponse(url="/mcp/", status_code=307)
 
 
 # ── Static SPA serving ──────────────────────────────────────────────────────

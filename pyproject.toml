@@ -7,11 +7,11 @@
 # @ai-tools: ruff (linting/formatting)
 # ==============================================================================
 #   Author: Marc Fiedler <marc@snakenet.org>
-#   Date: 2026-08-27
+#   Date: 2026-08-28
 
 [project]
 name = "nebula"
-version = "2.26.0"
+version = "2.27.0"
 description = "Nebula Vault, a self-hosted secrets manager for snakeNet.org"
 readme = "README.md"
 license = {text = "Apache Software License 2.0"}
@@ -38,6 +38,7 @@ dependencies = [
     "bcrypt>=4.2.0",
     "cryptography>=44.0.0",
     "fastapi>=0.136.3",
+    "fastmcp>=3.4.4",
     "loguru>=0.7.3",
     "pydantic>=2.0.0",
     "pyjwt>=2.12.1",

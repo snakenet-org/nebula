@@ -6,10 +6,14 @@
     project's access key), and a note on OIDC provider flexibility (any standards-compliant provider
     — Authentik, AWS IAM Identity Center, Microsoft Entra ID — works via api/endpoint.py's generic
     JWKS-based RS256 validation, not just Authentik specifically).
+  @ai-context: 2026-08-28: added the built-in MCP server highlight (nebula.mcp_server, mounted at
+    /mcp by main.py) — placed second, right after the data-model highlight, since it's a flagship
+    differentiator the README's own tagline now leads with too, not just another item in an
+    alphabetical-ish list.
   @dependencies: vue, shadcn-vue (card, badge), @phosphor-icons/vue
-  @version: 3.1.0
+  @version: 3.2.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-27
+  @date: 2026-08-28
 -->
 <script setup>
 import { Card, CardContent } from '@/components/ui/card';
@@ -24,6 +28,11 @@ const highlights = [
     title: 'Global environments, per-key clarity',
     description:
       'Environments live above any single project, so "production" or "staging" means the same thing everywhere — while every secret still carries its own encrypted value and its own sync settings.',
+  },
+  {
+    title: 'A built-in MCP server',
+    description:
+      "Nebula ships its own Model Context Protocol server at /mcp — point an MCP-speaking model or agent at it with one or more project access keys and it can read, find, and change secrets, variables, and certificates directly, no separate integration to build.",
   },
   {
     title: 'Live references, not copies',

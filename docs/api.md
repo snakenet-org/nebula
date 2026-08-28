@@ -53,6 +53,11 @@ secrets at deploy time, not for a human session. Required on **every** `/vault/*
 to the Project it happens to resolve) and `PUT /vault/secret` (which also additionally requires
 `X-Nebula-Token` — see above).
 
+The exact same credential also authenticates the built-in **MCP server** at `/mcp` (see its own
+section near the end of this file) — the one difference there is that its bearer token may carry
+**more than one** project access key at once, comma-separated, so a single MCP connection can be
+scoped to several specific Projects simultaneously.
+
 ---
 
 ## Public routes
@@ -229,3 +234,32 @@ Authorization: Bearer nbv_...
 ```json
 { "version": "2.5.0", "server_time": "2026-08-07T12:00:00Z" }
 ```
+
+---
+
+## MCP server (`/mcp`) — no human session
+
+A built-in [Model Context Protocol](https://modelcontextprotocol.io) server (streamable HTTP
+transport), for LLM clients rather than a REST caller. Authenticates the exact same way as
+`/vault/*` — a project access key as a bearer token — except the token may be **one or more** keys,
+comma-separated (`Authorization: Bearer nbv_aaa...,nbv_bbb...`), scoping one MCP connection to
+several specific Projects at once. If any listed key fails to resolve, the whole connection is
+rejected (fail-closed) rather than silently granting partial access. No `X-Nebula-Token` required,
+same reasoning as `/vault/*`'s three GET routes.
+
+Five tools, all resolving their `project`/`environment`/`key` arguments by human-readable name
+(case-insensitive), never by internal id:
+
+- **`list_projects`** — every Project the presented key(s) grant access to.
+- **`list_environments`** — every Environment defined in this instance (a global taxonomy).
+- **`find_secrets(project, query?, variable_type?, environment?)`** — search/list a Project's keys.
+  Never returns a secret or certificate's plaintext — only metadata, plus an environment variable's
+  own value (never masked, same as Nebula's UI).
+- **`read_secret(project, environment, key)`** — reveal one key's plaintext.
+- **`set_secret_value(project, environment, key, value)`** — change an *existing* key's value only
+  (never creates one); refuses a reference key, same as `PUT /vault/secret`; fans out to every
+  enabled GitHub sync target afterward.
+
+Every call is audit-logged (`mcp.search` / `mcp.read` / `mcp.update`), attributed to whichever
+access key granted access to the Project involved — visible in the Audit Logs page's "API calls"
+tab alongside every `/vault/*` call.

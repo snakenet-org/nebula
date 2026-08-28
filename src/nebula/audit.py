@@ -63,13 +63,22 @@
   series alongside the other three exactly like any other vault.py action. Deliberately NOT added to
   EXTRACTION_ACTIONS — setting a value never reveals one, so it must never count toward "how many
   times has this key's plaintext left the vault".
+  2026-08-28: new "mcp.search"/"mcp.read"/"mcp.update" — nebula.mcp_server's find_secrets/read_secret/
+  set_secret_value, the built-in MCP server's own project-access-key-authenticated tool calls. These
+  are a SEPARATE surface from VAULT_ACTIONS on purpose — that tuple is documented above as
+  enumerating api/v1/vault.py's own route actions specifically, and folding a second transport into
+  it would make that scoping claim false; they still show up in list_api_calls' "API calls" tab for
+  free (it filters only on ActorType.ACCESS_KEY, no action allowlist), just not in
+  list_failed_retrievals or the Dashboard's vault-specific charts. "mcp.read" IS added to
+  EXTRACTION_ACTIONS — a value genuinely left the vault through it, same as "secret.reveal"/
+  "vault.retrieve".
 @ai-rules:
   - Never put a plaintext secret value in `detail` or any other column.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 1.5.0
+@version: 1.6.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-27
+@date: 2026-08-28
 """
 
 import uuid
@@ -99,8 +108,12 @@ _SEARCHABLE_COLUMNS = (
 # top of the project access key, since it writes a value rather than just reading one.
 VAULT_ACTIONS: tuple[str, ...] = ("vault.retrieve", "vault.project", "vault.status", "vault.update")
 
-# The two actions that mean "a SecretKey's value actually left the vault" — see the module docstring.
-EXTRACTION_ACTIONS: tuple[str, ...] = ("secret.reveal", "vault.retrieve")
+# nebula.mcp_server's own tool-call actions — the built-in MCP server, a SEPARATE machine-credential
+# surface from VAULT_ACTIONS on purpose (see the module docstring's 2026-08-28 entry).
+MCP_ACTIONS: tuple[str, ...] = ("mcp.search", "mcp.read", "mcp.update")
+
+# The actions that mean "a SecretKey's value actually left the vault" — see the module docstring.
+EXTRACTION_ACTIONS: tuple[str, ...] = ("secret.reveal", "vault.retrieve", "mcp.read")
 
 
 def _client_ip(request: Request | None) -> str | None:
