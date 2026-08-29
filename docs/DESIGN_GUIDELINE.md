@@ -58,13 +58,54 @@ Before changing anything in this file, ask whether the change is actually Nebula
 State colors (`--destructive` `#f43f5e`, `--success` `#22c55e`, `--warning` `#fbbf24`, `--info`
 `#38bdf8`) are the universal red/green/amber/sky-blue set — never recolored with a brand hue.
 
-## Nebula-specific escape hatches
+## Nebula's concrete button/card/table/chart recipes
 
-- **Charts** (`DailyLineChart.vue`): the Dashboard's three single-series SVG charts take `color` as
+The Gravity page's §5.1 (gradient-driven button variants), §16 (identity/accent entity cards), §6
+(table row treatment), and §11.1 (token-driven chart recipe) describe the general *shape* of these
+patterns. This is Nebula's own instantiation of each — the actual tokens/angles/percentages/file
+locations, kept here rather than on Gravity since a different app picks its own values for these
+same slots.
+
+**Buttons** (`components/ui/button/index.js`) — three gradient stops (`--primary` Starlight Cyan,
+`--gold` Solar Gold, `--flare` `#ff8c00`), always at `135deg`:
+- `default`: 2-stop `linear-gradient(135deg, var(--primary), var(--flare))` fill +
+  `shadow-[0_0_20px_-6px_var(--primary)]`, brightening to a `--flare`-colored glow on hover.
+- `outline`: the double-background-layer gradient BORDER —
+  `[background:linear-gradient(var(--background),var(--background))_padding-box,linear-gradient(135deg,var(--gold),var(--primary)_55%,var(--flare))_border-box]`
+  — requires the base variant string to already carry `border border-transparent bg-clip-padding`.
+- `secondary`: a `color-mix(in oklab, var(--gold) 16%, var(--secondary))` →
+  `color-mix(in oklab, var(--flare) 16%, var(--secondary))` wash, brightening to `26%` on hover.
+- `ghost`: the identical gold→flare wash as `secondary`, but only ever rendered inside
+  `hover:[...]`/`aria-expanded:[...]` selectors — never at rest.
+- `destructive`/`warning`/`link` stay flat semantic (`bg-destructive/10`, `bg-warning/10`, plain
+  `text-primary` underline) — no gradient, ever. `--magenta` is deliberately NOT a button-gradient
+  stop (swapped out for `--flare` on 2026-08-12 — see the journal entry — magenta stays reserved for
+  `--accent`/ambient decoration only).
+
+**Project cards** (`HomeView.vue`'s `projectHue`/`NEBULA_HUE_VARS`): the 4-token hash set is
+`['--primary', '--magenta', '--gold', '--flare']`, indexed by a cheap string hash of the Project's
+own `id` (`hashString(p.id) % 4`) — never the name/description, which can change. Applied as: a
+`-top-12 -right-12 h-36 w-36 blur-3xl opacity-[0.14]` corner glow (`group-hover:opacity-25`), a
+`h-px` top-edge `linear-gradient(90deg, transparent, <hue>, transparent)` filament at `opacity-50`,
+and a `color-mix(in oklab, <hue> 18%, transparent)`-tinted initials avatar. This is the only place
+in the app a card's own accent color varies per-instance — every other Card stays neutral.
+
+**Tables**: row hover is `hover:bg-muted/50` (`TableRow.vue`), selected/expanded rows step up to
+`data-[state=selected]:bg-muted` / `has-aria-expanded:bg-muted/50` — both plain `--muted` at
+different strengths, never a brand/state color. Separators are the default `border-b` using
+`--border` (`rgba(255, 255, 255, 0.09)`). No zebra striping anywhere.
+
+**Charts** (`DailyLineChart.vue`): the Dashboard's three single-series SVG charts take `color` as
   a prop but `DashboardView.vue` currently passes raw hex literals (`#00f0ff`, `#ffb703`, `#f43f5e`)
   instead of resolving the live CSS variables — these happen to equal `--primary`/`--gold`/
   `--destructive` today. If the brand tokens above are ever re-themed, update those three `color`
-  props to match.
+  props to match. The gradient area-fill under the line runs from the passed `color` at
+  `stop-opacity="0.28"` to fully transparent; the baseline rule and axis-label text use
+  `text-border`/`text-muted-foreground` (never a hardcoded gray) so they still re-theme even though
+  the line's own color is a hardcoded literal.
+
+## Nebula-specific escape hatches
+
 - **Login screen** (`LoginView.vue`): the animated starfield/nebula-wisp/sun/black-hole backdrop is
   the one place in the app using hardcoded hex/rgba instead of shared tokens — deliberately isolated
   to that file's `<script setup>` and `<style scoped>` block so the whole scene can be swapped
