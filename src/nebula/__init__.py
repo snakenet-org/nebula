@@ -14,7 +14,7 @@
 @date: 2026-08-28
 """
 
-version = "2.27.0"
+version = "2.27.1"
 
 
 def main() -> None:

@@ -32,12 +32,17 @@
   project-specific happened) so a caller/model can learn valid `project`/`environment` names before
   calling anything else. `find_secrets` is the "finding a secret/variable/certificate" tool — lists
   a Project's keys (optionally filtered by a name/description substring, variable_type, or
-  Environment) and NEVER returns a secret or certificate's plaintext, only metadata; an environment
-  variable's value IS included unmasked, exactly like Nebula's own UI (nebula.secrets/api/v1/
-  secret.py's `_to_response` — "environment" values are never anonymized). `read_secret` is the
-  "reading" tool — resolves (Project, Environment, key) and reveals its plaintext, transparently
-  following a reference key to its source's current value via resolve_effective, exactly like
-  nebula.secrets.reveal_value's every other caller. `set_secret_value` is the "changing" tool — the
+  Environment) and NEVER returns a secret or certificate's plaintext, only metadata; a set SECRET/
+  CERTIFICATE key's `value` is MASKED_VALUE_PLACEHOLDER (a literal, distinctive placeholder string),
+  NOT `None` — an unset key's `value` IS `None` (distinguishable via `is_set` too, but the
+  placeholder means a caller reading `value` alone can't mistake "masked" for "empty", which is
+  exactly what got reported as "secrets are returned empty" even though read_secret always worked
+  correctly). An environment variable's value IS included unmasked, exactly like Nebula's own UI
+  (nebula.secrets/api/v1/secret.py's `_to_response` — "environment" values are never anonymized).
+  `read_secret` is the "reading" tool — resolves (Project, Environment, key) and reveals its
+  plaintext, transparently following a reference key to its source's current value via
+  resolve_effective, exactly like nebula.secrets.reveal_value's every other caller.
+  `set_secret_value` is the "changing" tool — the
   MCP-surface twin of api/v1/vault.py's `PUT /secret`: changes an EXISTING key's value only (never
   creates one), refuses a reference key (its value can only change in its source Project), passes
   its rotation schedule through UNCHANGED (this tool has no concept of a schedule to offer — see
@@ -68,7 +73,7 @@
   - Never return a secret/certificate's plaintext from find_secrets — only read_secret may.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastmcp, sqlalchemy[asyncio], loguru
-@version: 1.0.0
+@version: 1.0.1
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-28
 """
@@ -235,9 +240,20 @@ async def _auto_sync_github(
         )
 
 
+MASKED_VALUE_PLACEHOLDER = "<hidden — call read_secret to reveal>"
+
+
 async def _key_summary(session: AsyncSession, project_name: str, key: SecretKey) -> dict:
     """find_secrets' per-key response shape — metadata only, plus an ENVIRONMENT-type key's own
-    (never-anonymized) value, mirroring api/v1/secret.py's `_to_response`."""
+    (never-anonymized) value, mirroring api/v1/secret.py's `_to_response`.
+
+    A masked (SECRET/CERTIFICATE) key that IS set gets MASKED_VALUE_PLACEHOLDER rather than `None`
+    for `value` — `None` was previously used for both "masked" and "genuinely unset", which an MCP
+    client/model can't tell apart from `is_set` alone without reading this tool's prose description
+    closely; a caller mistaking "masked" for "empty" was reported as "secrets are returned empty"
+    even though read_secret always worked correctly. The placeholder text itself doubles as the
+    in-band nudge toward read_secret for a client that skips the tool description.
+    """
     environment = await environments_service.get_environment(session, key.environment_id)
     # VariableType is stored as a plain String column, not a SQLAlchemy Enum type — after any DB
     # round-trip (including the refresh inside create_key/set_value) it comes back as a bare `str`,
@@ -251,6 +267,8 @@ async def _key_summary(session: AsyncSession, project_name: str, key: SecretKey)
     value: str | None = None
     if variable_type == VariableType.ENVIRONMENT and ciphertext is not None:
         value = await secrets_service.reveal_value(session, key)
+    elif ciphertext is not None:
+        value = MASKED_VALUE_PLACEHOLDER
 
     source_label: str | None = None
     if key.source_key_id is not None:
@@ -310,9 +328,10 @@ async def find_secrets(
     """Search/list the secrets, environment variables, and certificates in one Project (by name —
     call list_projects first if you don't already know it). Never returns a secret or certificate's
     plaintext — only metadata (description, type, environment, whether a value is set, sync status,
-    and, for a reference key, which key it points at). An environment variable's own value IS
-    included, unmasked, exactly like Nebula's own UI — call read_secret for a secret/certificate's
-    plaintext instead.
+    and, for a reference key, which key it points at). A set secret/certificate's `value` field is
+    the literal string "<hidden — call read_secret to reveal>", NOT its actual value and NOT empty —
+    call read_secret with the same project/environment/key to get the real plaintext. An environment
+    variable's own value IS included, unmasked, exactly like Nebula's own UI.
 
     `query` (optional) case-insensitively substring-matches the key's name and description.
     `variable_type` (optional) is one of "secret", "environment", or "certificate". `environment`
