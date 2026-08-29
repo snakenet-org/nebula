@@ -185,6 +185,12 @@
     App.vue's same-day journal entry). Briefly four buttons the same day (Sharing was its own
     button) until Sharing and Access Management were merged back into one view/button per a
     same-day follow-up ask. Same visibility gate as before (owner/admin/editor), unchanged.
+    2026-08-29: the three header buttons are gone entirely — General settings/Access Management/
+    Git-Sync are now sub-items of a project-scoped section in App.vue's own right-hand nav rail
+    (shown only while `projectId` is set, i.e. on this page or one of its three settings pages),
+    with a "back to project" entry above them. Same owner/admin/editor visibility gate as before,
+    now enforced by App.vue's own lightweight `getProject` fetch instead of this view's. See
+    App.vue's same-day journal entry for the sidebar side of this change.
     2026-08-27 (later same day): new "certificate" variable_type (nebula.models.tables.VariableType.
     CERTIFICATE) — a third Type Select option everywhere secret/variable already appear (the New key
     dialog's Type Select, both the bare-create-for-a-viewer variant and the direct-value tab).
@@ -210,13 +216,13 @@
     represent a whole certificate file's content, so bulk-importing one was never in scope.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, tooltip, checkbox, alert-dialog, dialog, skeleton)
-  @version: 9.4.1
+  @version: 9.5.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-27
 -->
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { PhArrowLeft, PhArrowsClockwise, PhCheck, PhCopy, PhDownload, PhEye, PhEyeSlash, PhGearSix, PhGithubLogo, PhInfo, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhUsers, PhWarning, PhX } from '@phosphor-icons/vue';
+import { PhArrowLeft, PhArrowsClockwise, PhCheck, PhCopy, PhDownload, PhEye, PhEyeSlash, PhInfo, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhWarning, PhX } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { useConfig } from '../composables/useConfig';
@@ -816,22 +822,9 @@ async function saveValue() {
     </div>
 
     <template v-else-if="project">
-      <div class="flex items-start justify-between gap-4 mb-6 flex-wrap">
-        <div>
-          <h1 class="text-2xl font-bold">{{ project.name }}</h1>
-          <p v-if="project.description" class="text-muted-foreground text-sm mt-1">{{ project.description }}</p>
-        </div>
-        <div v-if="['owner', 'admin', 'editor'].includes(project.my_role)" class="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" @click="emit('navigate', `/projects/${projectId}/settings`)">
-            <PhGearSix :size="14" weight="bold" /> General settings
-          </Button>
-          <Button variant="outline" size="sm" @click="emit('navigate', `/projects/${projectId}/settings/access`)">
-            <PhUsers :size="14" weight="bold" /> Access Management
-          </Button>
-          <Button variant="outline" size="sm" @click="emit('navigate', `/projects/${projectId}/settings/git-sync`)">
-            <PhGithubLogo :size="14" weight="bold" /> Git-Sync
-          </Button>
-        </div>
+      <div class="mb-6">
+        <h1 class="text-2xl font-bold">{{ project.name }}</h1>
+        <p v-if="project.description" class="text-muted-foreground text-sm mt-1">{{ project.description }}</p>
       </div>
 
       <Card v-if="!environments.length" class="mb-6">

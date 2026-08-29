@@ -59,18 +59,47 @@
     both share the exact same owner/admin/editor permission tier), ProjectGitSyncView
     (`/settings/git-sync`) — per product ask. `settingsSection` (parsed from the same `projectMatch`
     regex, with an extra optional capture group for the sub-path segment) picks the right one;
-    `undefined`/no match falls through to plain ProjectView. Each of the three views renders its own
-    `ProjectSettingsNav` sub-nav (back-to-project + a row of buttons jumping directly between the
-    three sections) rather than App.vue's own nav rail knowing about them.
+    `undefined`/no match falls through to plain ProjectView.
+    2026-08-29: the three settings pages' own `ProjectSettingsNav` sub-nav (a "back to project" link
+    + a row of buttons jumping between the three sections, and ProjectView's own three header
+    buttons before that) are both gone — replaced by a project-scoped section of THIS nav rail
+    itself, per product ask ("buttons at the top right" → "an extended sidebar with sub-items").
+    Shown only while `projectId` is set (i.e. on ProjectView or any of its three settings pages,
+    never on the Projects list or anywhere else) — a "back to project" entry (the project's own
+    name, highlighted when `settingsSection` is null) followed by three indented sub-items (General
+    settings/Access Management/Git-Sync), gated on the SAME owner/admin/editor tier the old header
+    buttons used. Since App.vue previously had no reason to know anything about a Project beyond its
+    bare id (parsed out of the URL), it now does its own lightweight `api.getProject(projectId)`
+    fetch (`sidebarProject`, re-fetched on every `projectId` change, cleared to `null` when leaving a
+    project) purely to read `name`/`my_role` for this section — a deliberate, small duplication of
+    the fetch every one of the four project-scoped views already does on its own, matching this
+    app's existing no-shared-store convention rather than introducing one just for this. The
+    component file `components/ProjectSettingsNav.vue` was deleted as dead code — nothing else
+    referenced it.
+    2026-08-29 (later same day): while the nav rail is COLLAPSED, the three settings sub-items are
+    now wrapped in one shared "zone" `<div>` (`bg-primary/10`, `border border-primary/30`,
+    `rounded-lg`, `p-1`) instead of each icon carrying its own individual highlight — per product
+    follow-up ("one large zone behind and around the sub-menu items with a strong visible border,"
+    not "individually colored highlights with spaces in between them"). A first pass tried exactly
+    that individually-outlined shape (`outline` per icon, since the shared Button base already claims
+    `border border-transparent` and a plain `border-*` override on a `Button` is a known fragile spot
+    in this app) — replaced here because a wrapping `<div>` has no such conflicting base class, so a
+    real `border` reads as the "strong visible border" the ask wanted, drawn once around the whole
+    cluster rather than once per icon with gaps showing through. A follow-up ask then dialed the
+    border back down from `border-2 border-primary/50` to a thinner, lower-opacity `border
+    border-primary/30` — same shape, just subtler. The active sub-item still pops via the same
+    `bg-accent text-accent-foreground` every other nav item uses, now layered on top of the zone's
+    own translucent fill. Expanded mode is unchanged — indentation + a text label already make
+    the grouping obvious there. See the Frontend Design Guideline's nav-rail section.
   @dependencies: vue, @phosphor-icons/vue, vue-sonner, shadcn-vue (button, tooltip, separator,
     avatar, sonner)
-  @version: 5.7.0
+  @version: 6.1.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-27
+  @date: 2026-08-29
 -->
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { PhFolders, PhGauge, PhGearSix, PhInfo, PhPassword, PhScroll, PhStack, PhSignOut } from '@phosphor-icons/vue';
+import { PhFolderOpen, PhFolders, PhGauge, PhGearSix, PhGithubLogo, PhInfo, PhPassword, PhScroll, PhStack, PhSignOut, PhUsers } from '@phosphor-icons/vue';
 import { Toaster } from '@/components/ui/sonner';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
@@ -138,14 +167,33 @@ watch(isAuthed, (authed, wasAuthed) => {
 // `/projects/:id/settings` (bare, no suffix) is General settings — kept as the default settings
 // path so pre-existing links/bookmarks to plain `/settings` still resolve; the other two settings
 // views live at `/settings/access` (Sharing + API access keys, merged into one) and
-// `/settings/git-sync`. See components/ProjectSettingsNav.vue for the shared sub-nav that links
-// between all three.
+// `/settings/git-sync`. The project-scoped nav-rail section further down (sidebarProject/
+// canManageSidebarProject) is what links between all three now — see the 2026-08-29 journal entry.
 const projectMatch = computed(() => path.value.match(/^\/projects\/([^/?]+)(\/settings(?:\/([a-z-]+))?)?/));
 const projectId = computed(() => (projectMatch.value ? decodeURIComponent(projectMatch.value[1]) : null));
 const settingsSection = computed(() => {
   if (!projectMatch.value?.[2]) return null;
   return projectMatch.value[3] || 'general';
 });
+
+// Feeds the project-scoped nav-rail section below (name + role for the "back to project"/settings
+// sub-items) — a small dedicated fetch, not shared with the views themselves, matching this app's
+// existing no-shared-store convention (see the 2026-08-29 journal entry above).
+const sidebarProject = ref(null);
+watch(
+  projectId,
+  async (id) => {
+    sidebarProject.value = null;
+    if (!id) return;
+    try {
+      sidebarProject.value = await api.getProject(id);
+    } catch {
+      sidebarProject.value = null;
+    }
+  },
+  { immediate: true }
+);
+const canManageSidebarProject = computed(() => ['owner', 'admin', 'editor'].includes(sidebarProject.value?.my_role));
 
 const currentView = computed(() => {
   if (projectId.value) {
@@ -302,6 +350,125 @@ onUnmounted(() => document.removeEventListener('visibilitychange', _handleVisibi
           >
             <PhFolders :size="18" weight="bold" /> Projects
           </Button>
+
+          <!-- Project-scoped section: only rendered while inside a Project (ProjectView or one of
+               its three settings pages) — a "back to project" entry, then General settings/Access
+               Management/Git-Sync as indented sub-items, gated the same owner/admin/editor tier the
+               old header buttons used. See the 2026-08-29 journal entry above. -->
+          <template v-if="projectId">
+            <Separator class="my-1" />
+
+            <Tooltip v-if="!sidebarExpanded">
+              <TooltipTrigger as-child>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="w-full"
+                  :class="!settingsSection ? 'bg-accent text-accent-foreground' : ''"
+                  @click="navigate(`/projects/${projectId}`)"
+                >
+                  <PhFolderOpen :size="18" weight="bold" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="left">{{ sidebarProject?.name || 'Back to project' }}</TooltipContent>
+            </Tooltip>
+            <Button
+              v-else
+              variant="ghost"
+              class="w-full justify-start gap-2.5"
+              :class="!settingsSection ? 'bg-accent text-accent-foreground' : ''"
+              @click="navigate(`/projects/${projectId}`)"
+            >
+              <PhFolderOpen :size="18" weight="bold" /> <span class="truncate">{{ sidebarProject?.name || 'Back to project' }}</span>
+            </Button>
+
+            <template v-if="canManageSidebarProject">
+              <!-- Collapsed: one bordered "zone" wraps all three sub-items, rather than each icon
+                   carrying its own individual highlight — a single continuous shape reads as one
+                   group at a glance; individually-outlined icons with gaps between them didn't. See
+                   the Frontend Design Guideline's nav-rail section. -->
+              <div v-if="!sidebarExpanded" class="w-full flex flex-col gap-1 p-1 rounded-lg bg-primary/10 border border-primary/30">
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="w-full"
+                      :class="settingsSection === 'general' ? 'bg-accent text-accent-foreground' : ''"
+                      @click="navigate(`/projects/${projectId}/settings`)"
+                    >
+                      <PhGearSix :size="16" weight="bold" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">General settings</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="w-full"
+                      :class="settingsSection === 'access' ? 'bg-accent text-accent-foreground' : ''"
+                      @click="navigate(`/projects/${projectId}/settings/access`)"
+                    >
+                      <PhUsers :size="16" weight="bold" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Access Management</TooltipContent>
+                </Tooltip>
+
+                <Tooltip>
+                  <TooltipTrigger as-child>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="w-full"
+                      :class="settingsSection === 'git-sync' ? 'bg-accent text-accent-foreground' : ''"
+                      @click="navigate(`/projects/${projectId}/settings/git-sync`)"
+                    >
+                      <PhGithubLogo :size="16" weight="bold" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="left">Git-Sync</TooltipContent>
+                </Tooltip>
+              </div>
+
+              <template v-else>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="w-full justify-start gap-2.5 pl-8"
+                  :class="settingsSection === 'general' ? 'bg-accent text-accent-foreground' : ''"
+                  @click="navigate(`/projects/${projectId}/settings`)"
+                >
+                  <PhGearSix :size="16" weight="bold" /> General settings
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="w-full justify-start gap-2.5 pl-8"
+                  :class="settingsSection === 'access' ? 'bg-accent text-accent-foreground' : ''"
+                  @click="navigate(`/projects/${projectId}/settings/access`)"
+                >
+                  <PhUsers :size="16" weight="bold" /> Access Management
+                </Button>
+
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="w-full justify-start gap-2.5 pl-8"
+                  :class="settingsSection === 'git-sync' ? 'bg-accent text-accent-foreground' : ''"
+                  @click="navigate(`/projects/${projectId}/settings/git-sync`)"
+                >
+                  <PhGithubLogo :size="16" weight="bold" /> Git-Sync
+                </Button>
+              </template>
+            </template>
+
+            <Separator class="my-1" />
+          </template>
 
           <Tooltip v-if="!sidebarExpanded">
             <TooltipTrigger as-child>

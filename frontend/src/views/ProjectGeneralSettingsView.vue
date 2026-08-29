@@ -12,18 +12,20 @@
     ref split (unlike the per-row AlertDialogs in ProjectAccessManagementView/ProjectGitSyncView) —
     it's the typed text itself, not an item pulled from a list, so nothing can null it out from under
     the confirm dialog's own close machinery.
+  @ai-context2: 2026-08-29: dropped the page's own `ProjectSettingsNav` sub-nav — "back to
+    project"/General settings/Access Management/Git-Sync now live as a project-scoped section of
+    App.vue's own nav rail instead (see that file's same-day journal entry).
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, input, label, button,
-    separator, alert-dialog, skeleton), ../components/ProjectSettingsNav.vue
-  @version: 1.0.0
+    separator, alert-dialog, skeleton)
+  @version: 1.1.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-27
+  @date: 2026-08-29
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
 import { PhArrowsLeftRight } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
-import ProjectSettingsNav from '../components/ProjectSettingsNav.vue';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -121,8 +123,6 @@ async function transferProject() {
 
 <template>
   <div class="max-w-6xl mx-auto px-4 py-8 w-full">
-    <ProjectSettingsNav :project-id="projectId" active="general" @navigate="(p) => emit('navigate', p)" />
-
     <div v-if="loading" class="space-y-4">
       <Skeleton class="h-8 w-64" />
       <Skeleton class="h-40 rounded-xl" />

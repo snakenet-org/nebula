@@ -24,19 +24,20 @@
     - `confirmDeleteTarget` must live in a ref that is ONLY ever set on open and cleared by our own
       code — never nulled by the dialog's own `@update:open` handler. See
       ProjectAccessManagementView.vue's own header comment for the full race-condition rationale.
+  @ai-context2: 2026-08-29: dropped the page's own `ProjectSettingsNav` sub-nav — "back to
+    project"/General settings/Access Management/Git-Sync now live as a project-scoped section of
+    App.vue's own nav rail instead (see that file's same-day journal entry).
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, select, badge,
-    alert-dialog, dialog, switch, tabs, input, label, button, skeleton), ../components/
-    ProjectSettingsNav.vue
-  @version: 1.0.0
+    alert-dialog, dialog, switch, tabs, input, label, button, skeleton)
+  @version: 1.1.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-27
+  @date: 2026-08-29
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
 import { PhArrowsClockwise, PhGithubLogo, PhKey, PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
-import ProjectSettingsNav from '../components/ProjectSettingsNav.vue';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -51,7 +52,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Skeleton } from '@/components/ui/skeleton';
 
 const props = defineProps({ projectId: { type: String, required: true } });
-const emit = defineEmits(['navigate']);
 
 const project = ref(null);
 const githubTargets = ref([]);
@@ -269,8 +269,6 @@ async function syncAllNow() {
 
 <template>
   <div class="max-w-6xl mx-auto px-4 py-8 w-full">
-    <ProjectSettingsNav :project-id="projectId" active="git-sync" @navigate="(p) => emit('navigate', p)" />
-
     <div v-if="loading" class="space-y-4">
       <Skeleton class="h-8 w-64" />
       <Skeleton class="h-40 rounded-xl" />

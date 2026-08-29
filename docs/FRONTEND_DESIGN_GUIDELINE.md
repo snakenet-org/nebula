@@ -222,6 +222,59 @@ follows, not a second page title.
   Project/Environment, Edit key), `space-y-4` for a form with more than one distinct section (e.g.
   fields followed by a `Tabs` block, as in the "New key" dialog).
 
+### 2.5 Nav rail — project-scoped sub-items
+
+The right-hand nav rail (`App.vue`) is icon-only by default (`w-16`) and expands to `w-56` on
+clicking the logo, showing a text label beside every icon. Every nav entry — collapsed or expanded
+— uses the same active-state token: `bg-accent text-accent-foreground` (translucent Cosmic Magenta,
+§1.4) on the item matching the current path, plain `variant="ghost"` otherwise.
+
+While inside a Project (`ProjectView` or any of its three settings pages), the rail additionally
+shows a project-scoped section between "Projects" and "Environments": a "back to project" entry
+(the Project's own name) followed by its three settings sub-items (General settings/Access
+Management/Git-Sync), gated to owner/admin/editor. This section only ever appears while a Project
+is open — never elsewhere.
+
+**Collapsed mode only**, the three sub-items are wrapped in one shared "zone" container — a single
+continuous shape drawn once around the whole cluster, not an individual highlight per icon — so they
+read as one distinct, temporary, project-scoped group rather than blending into the permanent icons
+above/below them (the "back to project" entry itself stays plain — it's the section's own header,
+not a sub-item, and sits outside the zone):
+
+```html
+<div class="w-full flex flex-col gap-1 p-1 rounded-lg bg-primary/10 border border-primary/30">
+  <!-- the three icon Buttons, each still plain `variant="ghost"`, `bg-accent text-accent-foreground`
+       only when active — exactly the same active-state treatment every other nav item uses -->
+</div>
+```
+
+Subtle fill (`bg-primary/10`) + a subtle, thin `border border-primary/30` — both keyed to `--primary`
+(Starlight Cyan, the app's dominant interactive color, §1.4), not `--accent`, so the *cluster itself*
+reads in the theme's primary hue while the *active member within it* still pops via the same accent
+highlight every other nav item uses, layered on top of the zone's own fill. Two things were tried and
+rejected before landing here: outlining each icon individually ("individually colored highlights with
+spaces in between them" doesn't read as one group the way a single wrapping border does — a real
+group needs one continuous shape, not several similarly-colored ones sitting near each other), and a
+heavier `border-2 border-primary/50` on this same wrapping `<div>` (too loud once it actually existed
+as one continuous shape — a thin, low-opacity border is enough to read as a boundary once nothing is
+competing with it).
+
+Use a plain `border` for this wrapping `<div>` — it has no competing base class, so `border-{color}`
+applies cleanly. This is the opposite advice from styling a `Button` directly: `buttonVariants`
+(`components/ui/button/index.js`) already claims `border border-transparent` on every variant, so a
+same-specificity `border-{color}` utility placed directly on a `Button` races that base class on
+stylesheet order rather than reliably overriding it (a known fragile spot in this app) — use
+`outline` there instead, never `border`, precisely because it's a wholly separate box-model layer.
+Reach for a wrapping element with a real `border` whenever the shape you want spans a whole group,
+not a single interactive control.
+
+Expanded mode does **not** get this zone — indentation (`pl-8`) plus the text label already make the
+sub-items' grouping obvious there, so adding the same wash would be redundant.
+
+If a future feature needs the same "temporary, contextual cluster of icons" pattern elsewhere in the
+rail, reuse this exact recipe (one wrapping `bg-primary/10` + `border border-primary/30` zone,
+collapsed-only) rather than inventing a new one.
+
 ## 3. Typography scale
 
 | Use | Classes |
