@@ -7,7 +7,9 @@
   ownership + this table) — Environment (GLOBAL, not project-scoped — a shared taxonomy of
   environment names/descriptions any project's keys can be linked to, name unique case-insensitively
   app-wide via uq_environments_name_lower) — SecretKey (project-scoped, cleartext name, unique
-  case-insensitively per project via uq_secret_keys_project_name_lower — the key/variable name a
+  case-insensitively per (project, environment) via uq_secret_keys_project_env_name_lower — since
+  2026-09-18, the same name may exist more than once in a Project as long as each occurrence sits in
+  a different Environment (previously unique per project alone) — the key/variable name a
   caller passes to api/v1/vault.py; carries its OWN `ciphertext` directly and a required
   `environment_id` — every key/value pair is linked to exactly one Environment, reassignable via
   nebula.secrets.update_key, never many-at-once — `ciphertext` is a Fernet token from
@@ -62,7 +64,7 @@
     nebula.secrets.RotationNotSupportedError.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 6.3.1
+@version: 6.4.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-27
 """
@@ -197,9 +199,13 @@ class Environment(Base):
 class SecretKey(Base):
     __tablename__ = "secret_keys"
     __table_args__ = (
+        # A key name is unique per (Project, Environment) — the same name may exist more than once
+        # in a Project as long as each occurrence is in a different Environment (2026-09-18, widened
+        # from project-alone uniqueness — see migration 0011_secret_key_name_unique_per_environment).
         Index(
-            "uq_secret_keys_project_name_lower",
+            "uq_secret_keys_project_env_name_lower",
             "project_id",
+            "environment_id",
             text("lower(name)"),
             unique=True,
         ),

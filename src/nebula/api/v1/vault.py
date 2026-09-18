@@ -77,7 +77,7 @@
   - Never log the resolved plaintext value.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 6.0.0
+@version: 6.0.1
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-27
 """
@@ -225,16 +225,16 @@ class VaultRouter(Endpoint):
                 detail=detail,
             )
 
-        secret_key = await secrets_service.get_key_by_name(session, resolved_project.id, key)
-        if secret_key is None:
-            await _audit(success=False, detail="Unknown key")
+        # A key name is unique per (project, environment), not per project alone (2026-09-18) — the
+        # requested environment must resolve first so the key lookup below can be scoped to it.
+        env = await environments_service.get_environment_by_name(session, environment)
+        if env is None:
+            await _audit(success=False, detail="Unknown environment")
             raise HTTPException(status_code=404, detail="Not found")
 
-        # A key is now linked to exactly one Environment — the caller's requested environment name
-        # must match it (case-insensitively), same anti-enumeration 404 as every other lookup miss.
-        env = await environments_service.get_environment(session, secret_key.environment_id)
-        if env.name.lower() != environment.lower():
-            await _audit(success=False, object_id=secret_key.id, detail="Environment mismatch")
+        secret_key = await secrets_service.get_key_by_name(session, resolved_project.id, env.id, key)
+        if secret_key is None:
+            await _audit(success=False, detail="Unknown key")
             raise HTTPException(status_code=404, detail="Not found")
 
         try:
@@ -284,14 +284,16 @@ class VaultRouter(Endpoint):
                 detail=detail,
             )
 
-        secret_key = await secrets_service.get_key_by_name(session, resolved_project.id, key)
-        if secret_key is None:
-            await _audit(success=False, detail="Unknown key")
+        # A key name is unique per (project, environment), not per project alone (2026-09-18) — the
+        # requested environment must resolve first so the key lookup below can be scoped to it.
+        env = await environments_service.get_environment_by_name(session, environment)
+        if env is None:
+            await _audit(success=False, detail="Unknown environment")
             raise HTTPException(status_code=404, detail="Not found")
 
-        env = await environments_service.get_environment(session, secret_key.environment_id)
-        if env.name.lower() != environment.lower():
-            await _audit(success=False, object_id=secret_key.id, detail="Environment mismatch")
+        secret_key = await secrets_service.get_key_by_name(session, resolved_project.id, env.id, key)
+        if secret_key is None:
+            await _audit(success=False, detail="Unknown key")
             raise HTTPException(status_code=404, detail="Not found")
 
         try:
