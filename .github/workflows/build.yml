@@ -206,7 +206,11 @@ jobs:
 
   # See the header comment above (2026-09-22 note) for why this only runs on a plain push to main,
   # pushing `:latest` only (no version tag exists for an ordinary merge commit) to Docker Hub,
-  # independently of build-nebula's own tag-triggered, ghcr.io-only release build above.
+  # independently of build-nebula's own tag-triggered, ghcr.io-only release build above. Docker Hub's
+  # own namespace is `snakenet` (no `-org` suffix — confirmed directly from Docker Hub's own "docker
+  # login -u snakenet" instructions for the DOCKER_ACCESS_KEY token after the first version of this
+  # job, using `snakenet-org` here to match the GitHub org name, failed login with 401 unauthorized;
+  # Docker Hub's namespace is unrelated to and doesn't have to match the GitHub org name).
   push-dockerhub-latest:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
@@ -218,7 +222,7 @@ jobs:
         - name: Login to Docker Hub
           uses: docker/login-action@v4
           with:
-            username: snakenet-org
+            username: snakenet
             password: ${{ secrets.DOCKER_ACCESS_KEY }}
 
         - name: Set up Docker Buildx
@@ -231,7 +235,7 @@ jobs:
             file: ./Dockerfile
             platforms: linux/amd64
             push: true
-            tags: docker.io/snakenet-org/nebula:latest
+            tags: docker.io/snakenet/nebula:latest
             labels: |
               org.opencontainers.image.title=nebula
               org.opencontainers.image.description=Self-hosted secrets manager for snakeNet.org (lite — bring your own PostgreSQL)
@@ -246,7 +250,7 @@ jobs:
             file: ./Dockerfile.aio
             platforms: linux/amd64
             push: true
-            tags: docker.io/snakenet-org/nebula-aio:latest
+            tags: docker.io/snakenet/nebula-aio:latest
             labels: |
               org.opencontainers.image.title=nebula-aio
               org.opencontainers.image.description=Self-hosted secrets manager for snakeNet.org (all-in-one — embedded PostgreSQL)
