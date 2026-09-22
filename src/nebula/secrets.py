@@ -63,7 +63,7 @@
   whole uploaded file, nebula.models.tables) needs no code changes anywhere in this module — it's
   stored/encrypted through the exact same `ciphertext`/`value` path a plain secret already uses.
 @dependencies: sqlalchemy[asyncio]
-@version: 3.2.0
+@version: 3.3.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-27
 """
@@ -207,14 +207,36 @@ async def resolve_effective(session: AsyncSession, key: SecretKey) -> tuple[Vari
 
 
 async def get_key_by_name(
-    session: AsyncSession, project_id: uuid.UUID, name: str
+    session: AsyncSession, project_id: uuid.UUID, environment_id: uuid.UUID, name: str
 ) -> SecretKey | None:
+    """Case-insensitive lookup scoped to one (project, environment) pair — since 2026-09-18 a key
+    name is unique per (project, environment), not per project alone
+    (uq_secret_keys_project_env_name_lower), so the same name may exist more than once in a Project
+    as long as each occurrence is in a different Environment. `environment_id` is required here so
+    this never risks matching more than one row; use find_key_by_name_any_environment for a
+    diagnostic-only, environment-agnostic lookup instead."""
     result = await session.execute(
         select(SecretKey).where(
-            SecretKey.project_id == project_id, SecretKey.name.ilike(name)
+            SecretKey.project_id == project_id,
+            SecretKey.environment_id == environment_id,
+            SecretKey.name.ilike(name),
         )
     )
     return result.scalar_one_or_none()
+
+
+async def find_key_by_name_any_environment(
+    session: AsyncSession, project_id: uuid.UUID, name: str
+) -> SecretKey | None:
+    """Case-insensitive lookup by name across every Environment of a Project — diagnostic-only (e.g.
+    api/v1/vault.py or mcp_server.py reporting "this key exists, but in a different environment"),
+    since more than one row can now match a bare name within a Project. Returns an arbitrary match
+    when more than one exists; never used to resolve a value — get_key_by_name is the one lookup
+    that's actually environment-scoped and safe for that."""
+    result = await session.execute(
+        select(SecretKey).where(SecretKey.project_id == project_id, SecretKey.name.ilike(name))
+    )
+    return result.scalars().first()
 
 
 async def create_key(
@@ -399,7 +421,11 @@ async def create_keys_bulk(
         raise BulkDuplicateKeyNamesError(within_batch_conflicts)
 
     existing = await list_keys(session, project_id)
-    existing_lower = {key.name.lower() for key in existing}
+    # Scoped to the batch's own target environment — a name already used in a DIFFERENT environment
+    # of this Project is no longer a conflict (2026-09-18, uq_secret_keys_project_env_name_lower).
+    existing_lower = {
+        key.name.lower() for key in existing if key.environment_id == environment_id
+    }
     against_existing_conflicts = [
         name for name, _value, _variable_type in items if name.lower() in existing_lower
     ]

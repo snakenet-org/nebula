@@ -214,11 +214,23 @@
     (success) color for a certificate. The "Upload .env" bulk-import flow's Type Select deliberately
     still only offers secret/variable — a `.env` file's per-line text format has no sane way to
     represent a whole certificate file's content, so bulk-importing one was never in scope.
+    2026-09-18: four fixes. (1) Cancelling the "New key" dialog (its own Cancel button, Escape, or
+    clicking outside) now resets its fields via a new closeKeyForm() — previously only a successful
+    addKey() called resetNewKeyForm(), so cancelling left stale values behind for next time. (2) Both
+    rotation-cadence Selects (New key dialog, per-row Set-value dialog) gained a trailing PhX icon
+    button that clears both the frequency Input and the unit Select in one click — the only way to
+    disable rotation before was to know it's done by clearing both fields by hand. (3) Since a key
+    name is now only unique per (project, environment) — not per project alone, see
+    nebula.secrets/migration 0011 — two keys of the same name may exist side by side in different
+    environments. (4) Environment reassignment moved out of the table's own inline per-row Select
+    into the "Edit key" dialog (alongside name/description) — the table's Environment column is now a
+    plain read-only Badge for everyone, matching how name/description are already only editable
+    through that same dialog.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, tooltip, checkbox, alert-dialog, dialog, skeleton)
-  @version: 9.5.0
+  @version: 10.0.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-27
+  @date: 2026-09-18
 -->
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
@@ -373,6 +385,13 @@ function resetNewKeyForm() {
   referenceSourceKeyId.value = '';
   referenceSourceKeys.value = [];
 }
+// Closes the dialog AND resets its fields, regardless of how it was closed (the Cancel button,
+// Escape, or clicking outside) — previously only a successful addKey() reset the form, so
+// cancelling left stale values behind for the next time the dialog was opened.
+function closeKeyForm() {
+  showKeyForm.value = false;
+  resetNewKeyForm();
+}
 
 // A convenience fill for the "Set value" tab's Value field — 35 characters, same Web-Crypto
 // rejection-sampled generator PasswordGeneratorDialog.vue's header button already uses. Purely
@@ -525,19 +544,6 @@ async function confirmUpload() {
   }
 }
 
-// ── Reassign environment ─────────────────────────────────────────────────
-async function reassignEnvironment(key, environmentId) {
-  if (environmentId === key.environment_id) return;
-  try {
-    const updated = await api.updateSecret(props.projectId, key.id, { environment_id: environmentId });
-    const idx = keys.value.findIndex((k) => k.id === updated.id);
-    if (idx !== -1) keys.value[idx] = updated;
-    toast.success('Environment updated.');
-  } catch (e) {
-    toast.error(e.message);
-  }
-}
-
 // ── GitHub sync toggle ───────────────────────────────────────────────────
 // Off just means "skip this key on every future push" (nebula.github_sync.sync_to_github) — it
 // does NOT remove a value already pushed to a linked repo, same push-only/no-deletion behavior a
@@ -637,22 +643,27 @@ const renameValue = computed({
   },
 });
 const renameDescription = ref('');
+// Environment reassignment moved here from the table's own inline Select (2026-09-18) — edited
+// alongside name/description instead of on the fly, per row.
+const renameEnvironmentId = ref('');
 const renamingKey = ref(false);
 function openRenameDialog(key) {
   renameTargetKey.value = key;
   renameValue.value = key.name;
   renameDescription.value = key.description || '';
+  renameEnvironmentId.value = key.environment_id;
   renameDialogOpen.value = true;
 }
 async function saveRename() {
   const target = renameTargetKey.value;
   const name = renameValue.value.trim();
-  if (!target || !name) return;
+  if (!target || !name || !renameEnvironmentId.value) return;
   renamingKey.value = true;
   try {
     const updated = await api.updateSecret(props.projectId, target.id, {
       name,
       description: renameDescription.value.trim() || null,
+      environment_id: renameEnvironmentId.value,
     });
     const idx = keys.value.findIndex((k) => k.id === updated.id);
     if (idx !== -1) keys.value[idx] = updated;
@@ -951,17 +962,7 @@ async function saveValue() {
                 </div>
               </TableCell>
               <TableCell class="align-top">
-                <Select
-                  v-if="canEdit"
-                  :model-value="key.environment_id"
-                  @update:model-value="(v) => reassignEnvironment(key, v)"
-                >
-                  <SelectTrigger size="sm" class="w-32"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Badge v-else variant="outline">{{ key.environment_name }}</Badge>
+                <Badge variant="outline">{{ key.environment_name }}</Badge>
               </TableCell>
               <TableCell class="align-top">
                 <div class="flex items-center gap-2">
@@ -1041,7 +1042,7 @@ async function saveValue() {
       </Card>
     </template>
 
-    <Dialog :open="showKeyForm" @update:open="(v) => (showKeyForm = v)">
+    <Dialog :open="showKeyForm" @update:open="(v) => (v ? (showKeyForm = true) : closeKeyForm())">
       <DialogContent class="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>New key</DialogTitle>
@@ -1152,6 +1153,15 @@ async function saveValue() {
                       <SelectItem value="year">Years</SelectItem>
                     </SelectContent>
                   </Select>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    title="Clear automatic rotation"
+                    @click="newKey.rotation_frequency = ''; newKey.rotation_unit = ''"
+                  >
+                    <PhX :size="14" weight="bold" />
+                  </Button>
                 </div>
                 <p class="text-muted-foreground text-xs">
                   Automatically re-generate this secret's value on this schedule. Leave blank to disable.
@@ -1198,7 +1208,7 @@ async function saveValue() {
           </Tabs>
 
           <DialogFooter>
-            <Button type="button" variant="outline" @click="showKeyForm = false">Cancel</Button>
+            <Button type="button" variant="outline" @click="closeKeyForm">Cancel</Button>
             <Button type="submit" :disabled="savingKey || !newKey.environment_id">Create</Button>
           </DialogFooter>
         </form>
@@ -1308,9 +1318,18 @@ async function saveValue() {
             <Label for="rename-key-description">Description</Label>
             <Textarea id="rename-key-description" v-model="renameDescription" placeholder="Description (optional)" rows="3" />
           </div>
+          <div class="space-y-1.5">
+            <Label for="rename-key-env">Environment</Label>
+            <Select v-model="renameEnvironmentId">
+              <SelectTrigger id="rename-key-env" class="w-full"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="env in environments" :key="env.id" :value="env.id">{{ env.name }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
           <DialogFooter>
             <Button type="button" variant="outline" @click="renameDialogOpen = false">Cancel</Button>
-            <Button type="submit" :disabled="renamingKey || !renameValue.trim()">Save</Button>
+            <Button type="submit" :disabled="renamingKey || !renameValue.trim() || !renameEnvironmentId">Save</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -1376,6 +1395,15 @@ async function saveValue() {
                   <SelectItem value="year">Years</SelectItem>
                 </SelectContent>
               </Select>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                title="Clear automatic rotation"
+                @click="editingRotationFrequency = ''; editingRotationUnit = ''"
+              >
+                <PhX :size="14" weight="bold" />
+              </Button>
             </div>
             <p class="text-muted-foreground text-xs">
               Automatically re-generate this secret's value on this schedule. Leave blank to disable.

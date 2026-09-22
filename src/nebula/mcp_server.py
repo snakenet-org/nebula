@@ -73,7 +73,7 @@
   - Never return a secret/certificate's plaintext from find_secrets — only read_secret may.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastmcp, sqlalchemy[asyncio], loguru
-@version: 1.0.1
+@version: 1.0.2
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-28
 """
@@ -397,26 +397,29 @@ async def read_secret(project: str, environment: str, key: str) -> dict:
             )
             raise ToolError(f"Unknown environment '{environment}'")
 
-        secret_key = await secrets_service.get_key_by_name(session, proj.id, key)
+        secret_key = await secrets_service.get_key_by_name(session, proj.id, env.id, key)
         if secret_key is None:
+            # A key name is unique per (project, environment), not per project alone (2026-09-18) —
+            # check whether it exists under a DIFFERENT environment before reporting a bare miss, so
+            # the error stays as specific as it was before that change.
+            other = await secrets_service.find_key_by_name_any_environment(session, proj.id, key)
+            if other is not None:
+                key_env = await environments_service.get_environment(session, other.environment_id)
+                await _audit(
+                    session,
+                    grant,
+                    action="mcp.read",
+                    object_type="secret_key",
+                    object_id=other.id,
+                    success=False,
+                    detail="Environment mismatch",
+                )
+                raise ToolError(
+                    f"Key '{key}' exists in project '{proj.name}' but is linked to environment "
+                    f"'{key_env.name}', not '{environment}'"
+                )
             await _audit(session, grant, action="mcp.read", success=False, detail="Unknown key")
             raise ToolError(f"Key '{key}' not found in project '{proj.name}'")
-
-        if secret_key.environment_id != env.id:
-            key_env = await environments_service.get_environment(session, secret_key.environment_id)
-            await _audit(
-                session,
-                grant,
-                action="mcp.read",
-                object_type="secret_key",
-                object_id=secret_key.id,
-                success=False,
-                detail="Environment mismatch",
-            )
-            raise ToolError(
-                f"Key '{key}' exists in project '{proj.name}' but is linked to environment "
-                f"'{key_env.name}', not '{environment}'"
-            )
 
         # See _key_summary's comment: coerce, since this comes back as a bare `str` after a DB
         # round-trip, not a VariableType instance.
@@ -474,26 +477,29 @@ async def set_secret_value(project: str, environment: str, key: str, value: str)
             )
             raise ToolError(f"Unknown environment '{environment}'")
 
-        secret_key = await secrets_service.get_key_by_name(session, proj.id, key)
+        secret_key = await secrets_service.get_key_by_name(session, proj.id, env.id, key)
         if secret_key is None:
+            # A key name is unique per (project, environment), not per project alone (2026-09-18) —
+            # check whether it exists under a DIFFERENT environment before reporting a bare miss, so
+            # the error stays as specific as it was before that change.
+            other = await secrets_service.find_key_by_name_any_environment(session, proj.id, key)
+            if other is not None:
+                key_env = await environments_service.get_environment(session, other.environment_id)
+                await _audit(
+                    session,
+                    grant,
+                    action="mcp.update",
+                    object_type="secret_key",
+                    object_id=other.id,
+                    success=False,
+                    detail="Environment mismatch",
+                )
+                raise ToolError(
+                    f"Key '{key}' exists in project '{proj.name}' but is linked to environment "
+                    f"'{key_env.name}', not '{environment}'"
+                )
             await _audit(session, grant, action="mcp.update", success=False, detail="Unknown key")
             raise ToolError(f"Key '{key}' not found in project '{proj.name}'")
-
-        if secret_key.environment_id != env.id:
-            key_env = await environments_service.get_environment(session, secret_key.environment_id)
-            await _audit(
-                session,
-                grant,
-                action="mcp.update",
-                object_type="secret_key",
-                object_id=secret_key.id,
-                success=False,
-                detail="Environment mismatch",
-            )
-            raise ToolError(
-                f"Key '{key}' exists in project '{proj.name}' but is linked to environment "
-                f"'{key_env.name}', not '{environment}'"
-            )
 
         try:
             # rotation_frequency/rotation_unit pass through UNCHANGED — this tool has no concept of
