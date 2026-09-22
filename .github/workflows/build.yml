@@ -30,6 +30,24 @@
 # (`7dc8bdea-d5d0-4ecb-ad28-14db3a4db413`, the same one Singularity already reuses) rather than
 # leaving this out entirely or inventing a new one, so Nebula's build notifications land in the same
 # place as Gravity's and Singularity's until/unless a dedicated topic is created for it later.
+#
+# 2026-09-22: added a second, independent trigger — `push: branches: [main]` — alongside the
+# pre-existing tag trigger, since `origin` here is a personal fork (`marc-fiedler/nebula`), not the
+# canonical org repo. `build-nebula`/`notify_build_failure`/`deploy`/`push` above are all still
+# tag-only (`build-nebula` gained `if: startsWith(github.ref, 'refs/tags/')`; the other three key off
+# `needs: build-nebula` alone — a `needs` job that was itself skipped, as `build-nebula` now is on an
+# ordinary branch push, is treated as "not succeeded," so they skip automatically with no `if` change
+# needed on any of them). Two NEW jobs run only `if: github.ref == 'refs/heads/main'`, independently
+# of each other and of the tag-triggered jobs above: `mirror-main` (git-pushes the exact merged commit
+# to `main` on the canonical `git@github.com:snakenet-org/nebula.git`, over HTTPS using `GH_PAT` — the
+# same token already used to log into ghcr.io as `github.actor`, confirmed with the user to already
+# carry push rights there too, so no separate mirror-specific credential was introduced) and
+# `push-dockerhub-latest` (rebuilds both the lite and all-in-one images and pushes ONLY a `:latest` tag
+# for each — `docker.io/snakenet-org/nebula`/`docker.io/snakenet-org/nebula-aio` — no versioned tag,
+# since an ordinary merge-to-main commit has no release version associated with it; that still only
+# happens via the tag-triggered `build-nebula` job above, which pushes to ghcr.io, not Docker Hub).
+# Docker Hub login uses `secrets.DOCKER_ACCESS_KEY` as the password against username `snakenet-org`
+# (confirmed with the user — this repo's Docker Hub org/username, not a per-developer account).
 
 name: Build Pipeline for Nebula Vault
 run-name: ${{ github.actor }} is deploying Nebula Vault 🌌
@@ -38,9 +56,12 @@ on:
     tags:
       - "[0-9]+.[0-9]+.[0-9]+-rc[0-9]+"
       - "[0-9]+.[0-9]+.[0-9]+"
+    branches:
+      - main
 
 jobs:
   build-nebula:
+    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     environment: prod
     env:
@@ -158,3 +179,70 @@ jobs:
             push_message_title: 'Nebula Vault ${{ github.ref_name }} deployed!'
             push_message_body: '${{ github.actor }} just deployed Nebula Vault v${{ github.ref_name }}.'
             push_message_url: 'https://snakenet.org/'
+
+  # See the header comment above (2026-09-22 note) for why this only runs on a plain push to main,
+  # independently of the tag-triggered jobs above — mirrors the exact merged commit onto the
+  # canonical org repo, which `origin` here (a personal fork) is not.
+  mirror-main:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+        - name: Checking out code...
+          uses: actions/checkout@v5
+          with:
+            fetch-depth: 0
+
+        - name: Push main to git@github.com:snakenet-org/nebula.git
+          run: |
+            git push "https://x-access-token:${{ secrets.GH_PAT }}@github.com/snakenet-org/nebula.git" "${{ github.sha }}:refs/heads/main"
+
+  # See the header comment above (2026-09-22 note) for why this only runs on a plain push to main,
+  # pushing `:latest` only (no version tag exists for an ordinary merge commit) to Docker Hub,
+  # independently of build-nebula's own tag-triggered, ghcr.io-only release build above.
+  push-dockerhub-latest:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+        - name: Checking out code...
+          uses: actions/checkout@v5
+
+        - name: Login to Docker Hub
+          uses: docker/login-action@v4
+          with:
+            username: snakenet-org
+            password: ${{ secrets.DOCKER_ACCESS_KEY }}
+
+        - name: Set up Docker Buildx
+          uses: docker/setup-buildx-action@v3
+
+        - name: Build and push Lite image (default, nebula)
+          uses: docker/build-push-action@v5
+          with:
+            context: .
+            file: ./Dockerfile
+            platforms: linux/amd64
+            push: true
+            tags: docker.io/snakenet-org/nebula:latest
+            labels: |
+              org.opencontainers.image.title=nebula
+              org.opencontainers.image.description=Self-hosted secrets manager for snakeNet.org (lite — bring your own PostgreSQL)
+              org.opencontainers.image.revision=${{ github.sha }}
+              org.opencontainers.image.vendor=snakeNet.org
+              org.opencontainers.image.url=https://snakeNet.org/
+
+        - name: Build and push All-in-One image (nebula-aio)
+          uses: docker/build-push-action@v5
+          with:
+            context: .
+            file: ./Dockerfile.aio
+            platforms: linux/amd64
+            push: true
+            tags: docker.io/snakenet-org/nebula-aio:latest
+            labels: |
+              org.opencontainers.image.title=nebula-aio
+              org.opencontainers.image.description=Self-hosted secrets manager for snakeNet.org (all-in-one — embedded PostgreSQL)
+              org.opencontainers.image.revision=${{ github.sha }}
+              org.opencontainers.image.vendor=snakeNet.org
+              org.opencontainers.image.url=https://snakeNet.org/
