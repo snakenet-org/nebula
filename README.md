@@ -4,6 +4,8 @@
 
 **A self-hosted secrets and certificate manager with a built-in MCP server.**
 
+![Nebula Vault dashboard](docs/assets/nebula-dashboard.png)
+
 </div>
 
 ---
