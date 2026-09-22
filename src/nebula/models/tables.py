@@ -201,7 +201,7 @@ class SecretKey(Base):
     __table_args__ = (
         # A key name is unique per (Project, Environment) — the same name may exist more than once
         # in a Project as long as each occurrence is in a different Environment (2026-09-18, widened
-        # from project-alone uniqueness — see migration 0011_secret_key_name_unique_per_environment).
+        # from project-alone uniqueness — see migration 0011_key_name_unique_per_env).
         Index(
             "uq_secret_keys_project_env_name_lower",
             "project_id",
