@@ -192,6 +192,13 @@ jobs:
           uses: actions/checkout@v5
           with:
             fetch-depth: 0
+            # actions/checkout persists the ephemeral GITHUB_TOKEN as a git credential
+            # (http.https://github.com/.extraheader) by default, and that persisted header takes
+            # precedence over the token embedded in the push URL below — so without this, the push
+            # silently authenticates as github-actions[bot] (which has no access to
+            # snakenet-org/nebula) instead of GH_PAT, and fails with a 403. Confirmed via a real
+            # failed run before this fix.
+            persist-credentials: false
 
         - name: Push main to git@github.com:snakenet-org/nebula.git
           run: |
