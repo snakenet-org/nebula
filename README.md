@@ -35,6 +35,25 @@ once from the environment and never written anywhere itself. See
 [docs/encryption.md](docs/encryption.md) for exactly how that works, and its one real limitation
 (rotating the key is destructive today).
 
+## Why Nebula Vault?
+
+Beyond the core secrets/environments/sharing model above:
+
+- **Automatic, multi-target GitHub sync** — push secrets and variables to as many GitHub
+  repositories as you like, automatically on every change, no separate "sync now" step to remember.
+- **Automatic rotation** — give any secret a rotation schedule (hours through years) and it
+  regenerates itself on time, fanning out to every connected repository with no manual step.
+- **Certificate storage** — upload a certificate file (a private key, a PEM chain, anything) and
+  it's stored and encrypted exactly like any other secret.
+- **A full audit trail** — every read, write, and API retrieval is logged: who did what, when, and
+  from where.
+- **A CLI for your pipelines** — [nebula-cli](https://github.com/snakenet-org/nebula-cli) is a
+  small, single-binary client that pulls secrets, variables, and certificates straight into a
+  deploy script or CI job using a project's access key.
+- **Bring your own identity provider** — sign in through any standards-compliant OIDC provider
+  (Authentik, AWS IAM Identity Center, Microsoft Entra ID, or your own), not just one baked-in
+  option.
+
 ## Who can see what
 
 - Sign-in is via **snakeNet ID** (Authentik SSO), same as every other snakeNet.org app, with an
@@ -118,6 +137,18 @@ identically:
   own embedded PostgreSQL 17 instance all run in one container, no separate database container to
   stand up.
 
+Both are published as **public images on Docker Hub** — no registry login needed:
+
+```bash
+docker pull snakenet/nebula:latest       # lite — bring your own PostgreSQL
+docker pull snakenet/nebula-aio:latest   # all-in-one — embedded PostgreSQL
+```
+
+`snakenet/nebula:latest` and `snakenet/nebula-aio:latest` track the tip of `main` and are rebuilt
+on every merge. Versioned release tags (`X.Y.Z`) are published to
+`ghcr.io/snakenet-org/nebula(-aio)` instead — pin to one of those for anything you'd call
+production.
+
 ```bash
 # Lite (default) — bring your own PostgreSQL
 docker run -d \
@@ -130,7 +161,7 @@ docker run -d \
   -e NEBULA_ADMIN_PASS=change-me \
   -e NEBULA_POSTGRES_HOST=your-postgres-host \
   -e NEBULA_POSTGRES_PASSWORD=your-postgres-password \
-  scr.snakenet.io/nebula:latest
+  snakenet/nebula:latest
 ```
 
 ```bash
@@ -144,7 +175,7 @@ docker run -d \
   -e NEBULA_JWT_SECRET="$(openssl rand -base64 32)" \
   -e NEBULA_ADMIN_USER=admin \
   -e NEBULA_ADMIN_PASS=change-me \
-  scr.snakenet.io/nebula-aio:<version>
+  snakenet/nebula-aio:latest
 ```
 
 `NEBULA_MASTER_KEY` and `NEBULA_TOKEN` are the two variables neither image will start without —
