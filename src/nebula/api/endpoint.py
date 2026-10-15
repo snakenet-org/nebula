@@ -22,9 +22,9 @@
   - Never return raw passwords, tokens, or secrets in API responses or logs.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, pyjwt, sqlalchemy[asyncio], loguru
-@version: 1.1.0
+@version: 1.1.1
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-10-15
 """
 
 import uuid
