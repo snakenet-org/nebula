@@ -810,7 +810,7 @@ wheels = [
 
 [[package]]
 name = "nebula"
-version = "2.29.1"
+version = "2.29.2"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },

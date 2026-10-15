@@ -22,9 +22,9 @@
   - Never return raw passwords, tokens, or secrets in API responses or logs.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, pyjwt, sqlalchemy[asyncio], loguru
-@version: 1.1.0
+@version: 1.1.1
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-06
+@date: 2026-10-15
 """
 
 import uuid
@@ -97,6 +97,13 @@ def decode_any_token(token: str) -> dict:
         except jwt.PyJWTError as exc:
             logger.debug(f"Local token rejected: {exc}")
             raise HTTPException(status_code=401, detail="Invalid token")
+        except RuntimeError as exc:
+            # decode_local_token raises a bare RuntimeError (not a jwt.PyJWTError) when
+            # NEBULA_JWT_SECRET isn't configured — an unset local-login secret, not a bad token.
+            # Must be caught here too, or any HS256-looking bearer token (e.g. a stale one left in
+            # a browser's localStorage) escapes as an unhandled 500 instead of a clean error.
+            logger.error(f"Local token validation unavailable: {exc}")
+            raise HTTPException(status_code=500, detail="Local login not configured (NEBULA_JWT_SECRET)")
     if alg == "RS256":
         return decode_oidc(token)
 
