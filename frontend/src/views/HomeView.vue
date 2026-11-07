@@ -18,15 +18,20 @@
     hover), a hairline top gradient filament, and a tinted initial-letter avatar — no per-project data
     drives the color (there's no "project color" field), it's purely a stable presentational hash so
     the same project always gets the same hue across reloads.
+    **2026-11-08**: a SecretKey always needs exactly one (global) Environment, so a Project is useless
+    until at least one Environment exists — "New project" is disabled while `listEnvironments()`
+    returns an empty list, and the no-projects empty state gains a hint + link to /environments.
+    `environments` stays `null` until loaded (and on load failure), so the button is never disabled
+    just because that one call failed — the backend doesn't require an Environment to create a Project.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input, label,
     dialog, skeleton, tabs)
-  @version: 3.1.0
+  @version: 3.2.0
   @author: Marc Fiedler <marc@snakenet.org>
-  @date: 2026-08-27
+  @date: 2026-11-08
 -->
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { PhFolderPlus, PhLockKey, PhMagnifyingGlass, PhX } from '@phosphor-icons/vue';
+import { PhFolderPlus, PhLockKey, PhStack, PhMagnifyingGlass, PhX } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -42,6 +47,9 @@ const emit = defineEmits(['navigate']);
 
 const projects = ref([]);
 const loading = ref(true);
+// null = not loaded yet (or failed) — only a confirmed-empty list disables "New project".
+const environments = ref(null);
+const noEnvironments = computed(() => Array.isArray(environments.value) && environments.value.length === 0);
 const createDialogOpen = ref(false);
 const creating = ref(false);
 const form = ref({ name: '', description: '' });
@@ -77,7 +85,12 @@ const emptyMessage = computed(() => {
 async function load() {
   loading.value = true;
   try {
-    projects.value = await api.listProjects();
+    const [projectList, envList] = await Promise.all([
+      api.listProjects(),
+      api.listEnvironments().catch(() => null),
+    ]);
+    projects.value = projectList;
+    environments.value = envList;
   } catch (e) {
     toast.error(e.message);
   } finally {
@@ -139,9 +152,11 @@ function initials(name) {
           Credentials, passwords, and variables, organized by project.
         </p>
       </div>
-      <Button @click="createDialogOpen = true">
-        <PhFolderPlus :size="18" weight="bold" /> New project
-      </Button>
+      <span :title="noEnvironments ? 'Create an environment first' : undefined">
+        <Button :disabled="noEnvironments" @click="createDialogOpen = true">
+          <PhFolderPlus :size="18" weight="bold" /> New project
+        </Button>
+      </span>
     </div>
 
     <div v-if="loading" class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -153,6 +168,15 @@ function initials(name) {
         <PhLockKey :size="32" weight="bold" class="mx-auto mb-3 text-muted-foreground" />
         <p class="font-semibold">No projects yet</p>
         <p class="text-muted-foreground text-sm mt-1">Create your first project to start storing secrets.</p>
+        <template v-if="noEnvironments">
+          <p class="text-muted-foreground text-sm mt-3">
+            Every key belongs to an environment, so you'll need to create your first environment
+            (e.g. <span class="font-mono">production</span>) before you can create a project.
+          </p>
+          <Button variant="outline" class="mt-4" @click="emit('navigate', '/environments')">
+            <PhStack :size="16" weight="bold" /> Create first environment
+          </Button>
+        </template>
       </CardContent>
     </Card>
 
