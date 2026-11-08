@@ -29,13 +29,13 @@
     App.vue's own nav rail instead (see that file's same-day journal entry).
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, select, badge,
     alert-dialog, dialog, switch, tabs, input, label, button, skeleton)
-  @version: 1.1.0
+  @version: 1.2.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-29
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
-import { PhArrowsClockwise, PhGithubLogo, PhKey, PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
+import { PhArrowsClockwise, PhCircleNotch, PhGithubLogo, PhKey, PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { Card, CardContent } from '@/components/ui/card';
@@ -214,13 +214,16 @@ async function toggleTargetEnabled(target, enabled) {
 // See this file's own header comment for why target/open-state are split across two refs.
 const confirmDeleteTarget = ref(null);
 const deleteTargetDialogOpen = ref(false);
+// Target ids whose DELETE request is still in flight — drives the row's Remove-button spinner.
+const deletingTargetIds = ref(new Set());
 function openDeleteTargetDialog(target) {
   confirmDeleteTarget.value = target;
   deleteTargetDialogOpen.value = true;
 }
 async function deleteTarget() {
   const target = confirmDeleteTarget.value;
-  if (!target) return;
+  if (!target || deletingTargetIds.value.has(target.id)) return;
+  deletingTargetIds.value.add(target.id);
   try {
     await api.deleteGithubTarget(props.projectId, target.id);
     githubTargets.value = githubTargets.value.filter((t) => t.id !== target.id);
@@ -228,6 +231,7 @@ async function deleteTarget() {
   } catch (e) {
     toast.error(e.message);
   } finally {
+    deletingTargetIds.value.delete(target.id);
     deleteTargetDialogOpen.value = false;
   }
 }
@@ -352,8 +356,9 @@ async function syncAllNow() {
                   <Button variant="ghost" size="icon-xs" title="Edit" @click="openEditTarget(t)">
                     <PhPencilSimple :size="13" weight="bold" />
                   </Button>
-                  <Button variant="destructive" size="icon-xs" title="Remove" @click="openDeleteTargetDialog(t)">
-                    <PhTrash :size="13" weight="bold" />
+                  <Button variant="destructive" size="icon-xs" title="Remove" :disabled="deletingTargetIds.has(t.id)" @click="openDeleteTargetDialog(t)">
+                    <PhCircleNotch v-if="deletingTargetIds.has(t.id)" :size="13" weight="bold" class="animate-spin" />
+                    <PhTrash v-else :size="13" weight="bold" />
                   </Button>
                 </TableCell>
               </TableRow>

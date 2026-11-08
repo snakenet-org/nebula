@@ -11,7 +11,7 @@
 
 [project]
 name = "nebula"
-version = "2.30.1"
+version = "2.31.0"
 description = "Nebula Vault, a self-hosted secrets manager for snakeNet.org"
 readme = "README.md"
 license = {text = "Apache Software License 2.0"}

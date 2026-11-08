@@ -17,13 +17,13 @@
     App.vue's own nav rail instead (see that file's same-day journal entry).
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, input, label, button,
     separator, alert-dialog, skeleton)
-  @version: 1.1.0
+  @version: 1.2.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-29
 -->
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
-import { PhArrowsLeftRight } from '@phosphor-icons/vue';
+import { PhArrowsLeftRight, PhCircleNotch } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { Card, CardContent } from '@/components/ui/card';
@@ -85,14 +85,21 @@ async function saveDetails() {
 
 // ── Danger zone ─────────────────────────────────────────────────────────
 const confirmDeleteProject = ref(false);
+// True while the DELETE request is in flight — drives the "Delete this project" button's spinner
+// (the AlertDialog auto-closes on click, so that button is where progress shows).
+const deletingProject = ref(false);
 async function deleteProject() {
+  if (deletingProject.value) return;
+  deletingProject.value = true;
+  confirmDeleteProject.value = false;
   try {
     await api.deleteProject(props.projectId);
-    confirmDeleteProject.value = false;
     toast.success('Project deleted.');
     emit('navigate', '/projects');
   } catch (e) {
     toast.error(e.message);
+  } finally {
+    deletingProject.value = false;
   }
 }
 
@@ -175,7 +182,10 @@ async function transferProject() {
           <p class="text-muted-foreground text-sm mb-4">
             Deleting a project permanently removes every environment, key, value, share, and access key.
           </p>
-          <Button variant="destructive" @click="confirmDeleteProject = true">Delete this project</Button>
+          <Button variant="destructive" :disabled="deletingProject" @click="confirmDeleteProject = true">
+            <PhCircleNotch v-if="deletingProject" :size="16" weight="bold" class="animate-spin" />
+            Delete this project
+          </Button>
         </CardContent>
       </Card>
     </template>

@@ -33,13 +33,13 @@
     inline and the other a modal.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, table, badge, button,
     input, label, dialog, alert-dialog, skeleton)
-  @version: 2.1.0
+  @version: 2.2.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-12
 -->
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { PhStack, PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
+import { PhCircleNotch, PhStack, PhPencilSimple, PhPlus, PhTrash } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { stripLineBreaks, truncate } from '../lib/utils';
@@ -143,16 +143,29 @@ async function saveEdit() {
 }
 
 // ── Delete ────────────────────────────────────────────────────────────────
+// Target and open-state live in separate refs (same split as ProjectView.vue's confirmDeleteKey):
+// AlertDialogAction auto-closes on click, so a combined ref could be nulled before the handler
+// reads it. `deletingIds` drives the row's Delete-button spinner while the request is in flight.
 const confirmDelete = ref(null);
+const deleteDialogOpen = ref(false);
+const deletingIds = ref(new Set());
+function openDeleteDialog(env) {
+  confirmDelete.value = env;
+  deleteDialogOpen.value = true;
+}
 async function deleteEnvironment() {
-  if (!confirmDelete.value) return;
+  const target = confirmDelete.value;
+  if (!target || deletingIds.value.has(target.id)) return;
+  deletingIds.value.add(target.id);
+  deleteDialogOpen.value = false;
   try {
-    await api.deleteEnvironment(confirmDelete.value.id);
-    environments.value = environments.value.filter((e) => e.id !== confirmDelete.value.id);
-    confirmDelete.value = null;
+    await api.deleteEnvironment(target.id);
+    environments.value = environments.value.filter((e) => e.id !== target.id);
     toast.success('Environment deleted.');
   } catch (e) {
     toast.error(e.message);
+  } finally {
+    deletingIds.value.delete(target.id);
   }
 }
 </script>
@@ -210,9 +223,11 @@ async function deleteEnvironment() {
                 variant="destructive"
                 size="icon-xs"
                 title="Delete"
-                @click="confirmDelete = env"
+                :disabled="deletingIds.has(env.id)"
+                @click="openDeleteDialog(env)"
               >
-                <PhTrash :size="13" weight="bold" />
+                <PhCircleNotch v-if="deletingIds.has(env.id)" :size="13" weight="bold" class="animate-spin" />
+                <PhTrash v-else :size="13" weight="bold" />
               </Button>
             </TableCell>
           </TableRow>
@@ -263,7 +278,7 @@ async function deleteEnvironment() {
       </DialogContent>
     </Dialog>
 
-    <AlertDialog :open="!!confirmDelete" @update:open="(v) => !v && (confirmDelete = null)">
+    <AlertDialog :open="deleteDialogOpen" @update:open="(v) => (deleteDialogOpen = v)">
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Delete this environment?</AlertDialogTitle>

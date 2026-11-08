@@ -71,8 +71,8 @@
     by SecretKey.sync_enabled (nebula.secrets/api/v1/secret.py) — an editor flips a shadcn-vue Switch,
     which PATCHes { sync_enabled } via the existing updateSecret call (toggleSync); a viewer sees a
     read-only "synced"/"paused" Badge instead, same Select-vs-Badge split canEdit already uses for the
-    Environment column. Turning sync off only stops FUTURE pushes (nebula.github_sync.sync_to_github
-    now skips the key) — it never retroactively removes a value already pushed to a linked repo.
+    Environment column. Turning sync off stops future pushes AND (since 2026-11-08) actively deletes the
+    key from every enabled linked repo's GitHub Environment (backend-side, update_key).
     2026-08-09: the "New key" form's value section is now a `newKeyValueMode` Tabs toggle ("Set
     value" / "Reference a secret", same Tabs pattern as ProjectSettingsView's GitHub sync PAT
     picker) instead of a plain Type Select + Value Input — "Reference a secret" is a two-step
@@ -228,7 +228,7 @@
     through that same dialog.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, tooltip, checkbox, alert-dialog, dialog, skeleton)
-  @version: 10.1.0
+  @version: 10.2.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-09-18
 -->
@@ -607,13 +607,17 @@ async function toggleAllSync(enabled) {
 // listener order entirely. Applied to every AlertDialog target in this file/ProjectSettingsView.vue.
 const confirmDeleteKey = ref(null);
 const deleteKeyDialogOpen = ref(false);
+// Ids of keys whose DELETE request is still in flight — drives the row's Delete-button spinner
+// (the AlertDialog itself auto-closes on click, so the row button is where progress shows).
+const deletingKeyIds = ref(new Set());
 function openDeleteKeyDialog(key) {
   confirmDeleteKey.value = key;
   deleteKeyDialogOpen.value = true;
 }
 async function deleteKey() {
   const target = confirmDeleteKey.value;
-  if (!target) return;
+  if (!target || deletingKeyIds.value.has(target.id)) return;
+  deletingKeyIds.value.add(target.id);
   try {
     await api.deleteSecret(props.projectId, target.id);
     keys.value = keys.value.filter((k) => k.id !== target.id);
@@ -624,6 +628,7 @@ async function deleteKey() {
   } catch (e) {
     toast.error(e.message);
   } finally {
+    deletingKeyIds.value.delete(target.id);
     deleteKeyDialogOpen.value = false;
   }
 }
@@ -1033,8 +1038,9 @@ async function saveValue() {
                 </Badge>
               </TableCell>
               <TableCell class="align-top text-right">
-                <Button v-if="canEdit" variant="destructive" size="icon-xs" title="Delete key" @click="openDeleteKeyDialog(key)">
-                  <PhTrash :size="13" weight="bold" />
+                <Button v-if="canEdit" variant="destructive" size="icon-xs" title="Delete key" :disabled="deletingKeyIds.has(key.id)" @click="openDeleteKeyDialog(key)">
+                  <PhCircleNotch v-if="deletingKeyIds.has(key.id)" :size="13" weight="bold" class="animate-spin" />
+                  <PhTrash v-else :size="13" weight="bold" />
                 </Button>
               </TableCell>
             </TableRow>

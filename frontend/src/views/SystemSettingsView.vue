@@ -23,7 +23,7 @@
     supported round-trip (POST /system/import accepts the exact VaultExport shape GET /system/export
     returns).
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, button, alert-dialog)
-  @version: 1.1.0
+  @version: 1.2.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-13
 -->
@@ -33,6 +33,7 @@ import {
   PhDatabase,
   PhDownloadSimple,
   PhScroll,
+  PhCircleNotch,
   PhTrash,
   PhUploadSimple,
   PhWarning,
@@ -237,7 +238,8 @@ async function runImport() {
               accounts are not affected. This cannot be undone.
             </p>
             <Button variant="destructive" :disabled="resettingData" @click="confirmResetData = true">
-              <PhTrash :size="16" weight="bold" /> Reset all data
+              <PhCircleNotch v-if="resettingData" :size="16" weight="bold" class="animate-spin" />
+              <PhTrash v-else :size="16" weight="bold" /> Reset all data
             </Button>
           </CardContent>
         </Card>
@@ -253,7 +255,8 @@ async function runImport() {
               undone.
             </p>
             <Button variant="destructive" :disabled="resettingLogs" @click="confirmResetLogs = true">
-              <PhTrash :size="16" weight="bold" /> Clear audit logs
+              <PhCircleNotch v-if="resettingLogs" :size="16" weight="bold" class="animate-spin" />
+              <PhTrash v-else :size="16" weight="bold" /> Clear audit logs
             </Button>
           </CardContent>
         </Card>
