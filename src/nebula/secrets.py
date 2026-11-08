@@ -63,7 +63,7 @@
   whole uploaded file, nebula.models.tables) needs no code changes anywhere in this module — it's
   stored/encrypted through the exact same `ciphertext`/`value` path a plain secret already uses.
 @dependencies: sqlalchemy[asyncio]
-@version: 3.3.0
+@version: 3.4.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-27
 """
@@ -399,6 +399,7 @@ async def create_keys_bulk(
     environment_id: uuid.UUID,
     items: list[tuple[str, str, VariableType]],
     created_by: uuid.UUID,
+    sync_enabled: bool = False,
 ) -> list[SecretKey]:
     """Create every (name, value, variable_type) triple in `items` as a brand-new key, one commit.
 
@@ -440,6 +441,7 @@ async def create_keys_bulk(
             environment_id=environment_id,
             variable_type=variable_type,
             ciphertext=encrypt_value(value),
+            sync_enabled=sync_enabled,
             created_by=created_by,
             updated_by=created_by,
         )

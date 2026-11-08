@@ -98,7 +98,7 @@
     existence/no-chaining checks as a substitute for that permission check.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 6.2.0
+@version: 6.3.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-27
 """
@@ -401,6 +401,7 @@ class SecretRouter(Endpoint):
                 environment_id=payload.environment_id,
                 items=[(item.name, item.value, item.variable_type) for item in payload.items],
                 created_by=actor.id,
+                sync_enabled=payload.sync_enabled,
             )
         except BulkDuplicateKeyNamesError as exc:
             raise HTTPException(

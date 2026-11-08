@@ -228,13 +228,13 @@
     through that same dialog.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, tooltip, checkbox, alert-dialog, dialog, skeleton)
-  @version: 10.0.0
+  @version: 10.1.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-09-18
 -->
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
-import { PhArrowLeft, PhArrowsClockwise, PhCheck, PhCopy, PhDownload, PhEye, PhEyeSlash, PhInfo, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhWarning, PhX } from '@phosphor-icons/vue';
+import { PhArrowLeft, PhArrowsClockwise, PhCheck, PhCircleNotch, PhCopy, PhDownload, PhEye, PhEyeSlash, PhInfo, PhLink, PhMagnifyingGlass, PhPencilSimple, PhPlus, PhTrash, PhUpload, PhWarning, PhX } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { useConfig } from '../composables/useConfig';
@@ -532,6 +532,8 @@ async function confirmUpload() {
     const created = await api.bulkCreateSecrets(props.projectId, {
       environment_id: uploadEnvironmentId.value,
       items: selected.map(({ name, value, variable_type }) => ({ name, value, variable_type })),
+      // Imported keys start with GitHub sync paused — flip per row afterwards via the Sync column.
+      sync_enabled: false,
     });
     keys.value.push(...created);
     toast.success(`Added ${created.length} variable${created.length === 1 ? '' : 's'}.`);
@@ -1277,6 +1279,7 @@ async function saveValue() {
         <DialogFooter>
           <Button variant="outline" @click="uploadDialogOpen = false">Cancel</Button>
           <Button :disabled="uploadSubmitting || !uploadEnvironmentId || !uploadIncludedCount" @click="confirmUpload">
+            <PhCircleNotch v-if="uploadSubmitting" :size="16" weight="bold" class="animate-spin" />
             Add {{ uploadIncludedCount }} variable{{ uploadIncludedCount === 1 ? '' : 's' }}
           </Button>
         </DialogFooter>
