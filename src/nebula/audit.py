@@ -72,13 +72,19 @@
   list_failed_retrievals or the Dashboard's vault-specific charts. "mcp.read" IS added to
   EXTRACTION_ACTIONS — a value genuinely left the vault through it, same as "secret.reveal"/
   "vault.retrieve".
+  2026-11-08: api/v1/vault.py's new GET /vault/environment (every key/value pair of one Environment
+  in one call) writes TWO kinds of rows: one "vault.environment" summary row per request (added to
+  VAULT_ACTIONS — it's one API request, so it counts once in the Dashboard's api_requests/
+  failed_attempts series), plus one "vault.environment.key" row per key whose plaintext it returned
+  (added to EXTRACTION_ACTIONS ONLY, not VAULT_ACTIONS — so the per-key extraction counts stay honest
+  for a bulk pull without inflating the per-request charts by N).
 @ai-rules:
   - Never put a plaintext secret value in `detail` or any other column.
   - Maintain 100% type-hinting coverage.
 @dependencies: sqlalchemy[asyncio]
-@version: 1.6.0
+@version: 1.7.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-28
+@date: 2026-11-08
 """
 
 import uuid
@@ -106,14 +112,25 @@ _SEARCHABLE_COLUMNS = (
 # Every api/v1/vault.py route's action string — see the module docstring above. "vault.update"
 # (2026-08-27) is PUT /vault/secret — the one vault.py route that also requires X-Nebula-Token on
 # top of the project access key, since it writes a value rather than just reading one.
-VAULT_ACTIONS: tuple[str, ...] = ("vault.retrieve", "vault.project", "vault.status", "vault.update")
+VAULT_ACTIONS: tuple[str, ...] = (
+    "vault.retrieve",
+    "vault.environment",
+    "vault.project",
+    "vault.status",
+    "vault.update",
+)
 
 # nebula.mcp_server's own tool-call actions — the built-in MCP server, a SEPARATE machine-credential
 # surface from VAULT_ACTIONS on purpose (see the module docstring's 2026-08-28 entry).
 MCP_ACTIONS: tuple[str, ...] = ("mcp.search", "mcp.read", "mcp.update")
 
 # The actions that mean "a SecretKey's value actually left the vault" — see the module docstring.
-EXTRACTION_ACTIONS: tuple[str, ...] = ("secret.reveal", "vault.retrieve", "mcp.read")
+EXTRACTION_ACTIONS: tuple[str, ...] = (
+    "secret.reveal",
+    "vault.retrieve",
+    "vault.environment.key",
+    "mcp.read",
+)
 
 
 def _client_ip(request: Request | None) -> str | None:

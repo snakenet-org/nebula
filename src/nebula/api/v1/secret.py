@@ -31,8 +31,10 @@
   is still referenced as another ProjectGithubSync target's PAT source — see nebula.secrets and
   nebula.github_sync's "reference" PAT mode. Also since 2026-08-08, create_key/update_key thread a
   `sync_enabled` flag through to nebula.secrets — a key with sync_enabled=False is skipped entirely
-  by github_sync.sync_to_github (never pushed, and never removed from an already-synced repo either,
-  same push-only/no-deletion behavior a deleted key already has).
+  by github_sync.sync_to_github (never pushed). Since 2026-11-08, update_key switching
+  sync_enabled true→false ALSO actively deletes the key from every enabled target's GitHub
+  Environment (`_remove_from_github` → github_sync.remove_key_from_github, audit-logged per target as
+  `github_sync_target.remove_key`), using the key's PRE-update name/environment.
   Since 2026-08-09, create_key also accepts `payload.source_key_id`, making the new key a REFERENCE
   to another SecretKey's value instead of owning one directly (generalizes the GitHub-sync PAT
   reference — nebula.github_sync's `pat_source_key_id` — to ordinary secrets/variables; see
@@ -98,7 +100,7 @@
     existence/no-chaining checks as a substitute for that permission check.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 6.2.0
+@version: 6.4.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-27
 """
@@ -162,6 +164,34 @@ async def _auto_sync_github(
             action="github_sync_target.sync", object_type="project_github_sync",
             object_id=result["target_id"], object_label=result["name"], project_id=project_id,
             success=result["success"], detail=f"Auto-sync on value change: {detail}",
+        )
+
+
+async def _remove_from_github(
+    session: AsyncSession,
+    actor: UserAccount,
+    request: Request,
+    project_id: uuid.UUID,
+    key_name: str,
+    environment_name: str,
+    variable_type: VariableType,
+) -> None:
+    """Best-effort: delete one key from every enabled GitHub sync target after its sync was switched
+    off (update_key). One audit row per target, success or failure. Never raises."""
+    try:
+        results = await github_sync_service.remove_key_from_github(
+            session, project_id,
+            key_name=key_name, environment_name=environment_name, variable_type=variable_type,
+        )
+    except Exception:
+        logger.exception("GitHub key removal crashed for project {}", project_id)
+        return
+    for result in results:
+        await audit_service.record_user_action(
+            session, actor, request,
+            action="github_sync_target.remove_key", object_type="project_github_sync",
+            object_id=result["target_id"], object_label=result["name"], project_id=project_id,
+            success=result["success"], detail=f"Sync disabled for key: {result['detail']}",
         )
 
 
@@ -401,6 +431,7 @@ class SecretRouter(Endpoint):
                 environment_id=payload.environment_id,
                 items=[(item.name, item.value, item.variable_type) for item in payload.items],
                 created_by=actor.id,
+                sync_enabled=payload.sync_enabled,
             )
         except BulkDuplicateKeyNamesError as exc:
             raise HTTPException(
@@ -436,6 +467,16 @@ class SecretRouter(Endpoint):
         key = await self._key_or_404(session, project_id, key_id)
         if payload.environment_id is not None:
             await self._environment_or_404(session, payload.environment_id)
+        # Snapshot what GitHub currently holds for this key BEFORE the update — if sync is being
+        # switched off, the stale copy is removed under its OLD name/environment (a rename or
+        # environment reassignment in the same PATCH must not leave the old entry behind).
+        sync_turned_off = key.sync_enabled and payload.sync_enabled is False
+        removal_snapshot: tuple[str, str, VariableType] | None = None
+        if sync_turned_off:
+            old_type, old_ciphertext = await secrets_service.resolve_effective(session, key)
+            if old_ciphertext is not None:  # never had a value → was never pushed, nothing to remove
+                old_env = await environments_service.get_environment(session, key.environment_id)
+                removal_snapshot = (key.name, old_env.name, VariableType(old_type))
         try:
             key = await secrets_service.update_key(
                 session,
@@ -458,6 +499,8 @@ class SecretRouter(Endpoint):
             action="secret.update", object_type="secret_key", object_id=key.id,
             object_label=key.name, project_id=project_id,
         )
+        if removal_snapshot is not None:
+            await _remove_from_github(session, actor, request, project_id, *removal_snapshot)
         await _auto_sync_github(session, actor, request, project_id)
         return await _to_response(session, actor, key)
 

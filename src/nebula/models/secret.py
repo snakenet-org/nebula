@@ -44,7 +44,7 @@
   nebula.secrets.RotationNotSupportedError is the same rule enforced again server-side as a
   backstop. SecretKeyResponse exposes the schedule (+ `last_rotated_at`) as this row's OWN columns
   always, never resolved through a reference.
-@version: 5.0.1
+@version: 5.1.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-27
 """
@@ -128,6 +128,9 @@ class SecretBulkCreateRequest(BaseModel):
 
     environment_id: uuid.UUID
     items: list[SecretBulkItem]
+    # Imported keys start with GitHub sync PAUSED by default (2026-11-08) — a freshly uploaded .env
+    # often carries local/dev values that shouldn't be pushed to a linked repo until reviewed.
+    sync_enabled: bool = False
 
 
 class SecretKeyUpdateRequest(BaseModel):

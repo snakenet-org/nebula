@@ -27,13 +27,13 @@
     App.vue's own nav rail instead (see that file's same-day journal entry).
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, input, select, table,
     badge, button, alert-dialog, skeleton)
-  @version: 1.1.0
+  @version: 1.2.0
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-08-29
 -->
 <script setup>
 import { computed, onMounted, ref } from 'vue';
-import { PhCheck, PhCopy, PhKey, PhTrash, PhUserPlus } from '@phosphor-icons/vue';
+import { PhCheck, PhCircleNotch, PhCopy, PhKey, PhTrash, PhUserPlus } from '@phosphor-icons/vue';
 import { toast } from 'vue-sonner';
 import * as api from '../services/api';
 import { Card, CardContent } from '@/components/ui/card';
@@ -103,13 +103,17 @@ async function changeRole(share, role) {
 // See this file's own header comment for why target/open-state are split across two refs.
 const confirmRevokeShare = ref(null);
 const revokeShareDialogOpen = ref(false);
+// user_ids / key ids whose revoke request is still in flight — drives the row button's spinner.
+const revokingShareIds = ref(new Set());
+const revokingKeyIds = ref(new Set());
 function openRevokeShareDialog(share) {
   confirmRevokeShare.value = share;
   revokeShareDialogOpen.value = true;
 }
 async function revokeShare() {
   const target = confirmRevokeShare.value;
-  if (!target) return;
+  if (!target || revokingShareIds.value.has(target.user_id)) return;
+  revokingShareIds.value.add(target.user_id);
   try {
     await api.revokeShare(props.projectId, target.user_id);
     shares.value = shares.value.filter((s) => s.user_id !== target.user_id);
@@ -117,6 +121,7 @@ async function revokeShare() {
   } catch (e) {
     toast.error(e.message);
   } finally {
+    revokingShareIds.value.delete(target.user_id);
     revokeShareDialogOpen.value = false;
   }
 }
@@ -154,7 +159,8 @@ function openRevokeKeyDialog(key) {
 }
 async function revokeAccessKey() {
   const target = confirmRevokeKey.value;
-  if (!target) return;
+  if (!target || revokingKeyIds.value.has(target.id)) return;
+  revokingKeyIds.value.add(target.id);
   try {
     await api.revokeAccessKey(props.projectId, target.id);
     const idx = accessKeys.value.findIndex((k) => k.id === target.id);
@@ -163,6 +169,7 @@ async function revokeAccessKey() {
   } catch (e) {
     toast.error(e.message);
   } finally {
+    revokingKeyIds.value.delete(target.id);
     revokeKeyDialogOpen.value = false;
   }
 }
@@ -219,8 +226,9 @@ async function revokeAccessKey() {
                   </Select>
                 </TableCell>
                 <TableCell class="text-right">
-                  <Button variant="destructive" size="icon-xs" title="Revoke access" @click="openRevokeShareDialog(share)">
-                    <PhTrash :size="13" weight="bold" />
+                  <Button variant="destructive" size="icon-xs" title="Revoke access" :disabled="revokingShareIds.has(share.user_id)" @click="openRevokeShareDialog(share)">
+                    <PhCircleNotch v-if="revokingShareIds.has(share.user_id)" :size="13" weight="bold" class="animate-spin" />
+                    <PhTrash v-else :size="13" weight="bold" />
                   </Button>
                 </TableCell>
               </TableRow>
@@ -278,8 +286,9 @@ async function revokeAccessKey() {
                   <Badge :variant="k.revoked ? 'destructive' : 'success'">{{ k.revoked ? 'revoked' : 'active' }}</Badge>
                 </TableCell>
                 <TableCell class="text-right">
-                  <Button v-if="!k.revoked" variant="destructive" size="icon-xs" title="Revoke" @click="openRevokeKeyDialog(k)">
-                    <PhTrash :size="13" weight="bold" />
+                  <Button v-if="!k.revoked" variant="destructive" size="icon-xs" title="Revoke" :disabled="revokingKeyIds.has(k.id)" @click="openRevokeKeyDialog(k)">
+                    <PhCircleNotch v-if="revokingKeyIds.has(k.id)" :size="13" weight="bold" class="animate-spin" />
+                    <PhTrash v-else :size="13" weight="bold" />
                   </Button>
                 </TableCell>
               </TableRow>

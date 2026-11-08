@@ -43,8 +43,10 @@
   anywhere in the vault takes effect on this target's very next sync with zero extra plumbing.
   Since 2026-08-08, sync_to_github also skips any SecretKey with `sync_enabled=False` (a per-key
   toggle, nebula.secrets/nebula.models.tables.SecretKey) — same as a key with no value set: it's
-  simply excluded from `by_environment` before any GitHub Environment/secret/variable push, so
-  toggling a key off never removes it from a repo it was already pushed to, only stops future pushes.
+  simply excluded from `by_environment` before any GitHub Environment/secret/variable push.
+  Since 2026-11-08, switching a key's sync OFF also actively DELETES it from every enabled target's
+  GitHub Environment (remove_key_from_github, called by api/v1/secret.py's update_key on a
+  true→false transition) — previously it only stopped future pushes and left the stale value there.
   Since 2026-08-09, a SecretKey itself can ALSO be a reference to another SecretKey's value
   (`source_key_id` — a DIFFERENT mechanism from this module's own `pat_source_key_id`, generalized
   the same way from "a sync target's PAT" to "any key's value" — see nebula.secrets' module
@@ -69,7 +71,7 @@
     pat_ciphertext/pat_source_key_id set — raise InvalidPatConfigurationError instead.
   - Maintain 100% type-hinting coverage.
 @dependencies: nebula.crypto
-@version: 3.3.0
+@version: 3.4.0
 @author: Marc Fiedler <marc@snakenet.org>
 @date: 2026-08-27
 """
@@ -396,6 +398,59 @@ async def sync_to_github(session: AsyncSession, target: ProjectGithubSync) -> di
     )
     await _record_target_status(session, target, success=not failures, detail=summary)
     return result
+
+
+class RemovalResult(TypedDict):
+    target_id: uuid.UUID
+    name: str
+    repo_url: str
+    success: bool
+    detail: str
+
+
+def _is_not_found(stderr: str) -> bool:
+    lowered = stderr.lower()
+    return "404" in lowered or "not found" in lowered
+
+
+async def remove_key_from_github(
+    session: AsyncSession,
+    project_id: uuid.UUID,
+    *,
+    key_name: str,
+    environment_name: str,
+    variable_type: VariableType,
+) -> list[RemovalResult]:
+    """Actively delete ONE key from every ENABLED sync target's matching GitHub Environment — the
+    counterpart to sync_to_github's push, called when a key's own `sync_enabled` is switched off
+    (api/v1/secret.py's update_key). Deletes via `gh secret delete` or `gh variable delete` following
+    the same SECRET/CERTIFICATE-vs-ENVIRONMENT split sync_to_github uses to push it. A 404 (the key —
+    or its GitHub Environment — was never there) counts as success: the end state is what matters.
+    Best-effort per target, never raises; deliberately does NOT touch the target's own
+    last_synced_at/last_sync_* status, since this isn't a full sync run."""
+    targets = [t for t in await list_sync_targets(session, project_id) if t.enabled]
+    verb = "variable" if variable_type == VariableType.ENVIRONMENT else "secret"
+
+    results: list[RemovalResult] = []
+    for target in targets:
+        base = {"target_id": target.id, "name": target_display_name(target), "repo_url": target.repo_url}
+        try:
+            owner, repo = parse_owner_repo(target.repo_url)
+            token = await _resolve_token(session, target)
+            returncode, _stdout, stderr = await _run_gh(
+                [verb, "delete", key_name, "--repo", f"{owner}/{repo}", "--env", environment_name],
+                token=token,
+            )
+        except GitHubSyncError as exc:
+            results.append({**base, "success": False, "detail": str(exc)})
+            continue
+        if returncode == 0:
+            results.append({**base, "success": True, "detail": f"Removed {verb} '{key_name}' ({environment_name})"})
+        elif _is_not_found(stderr):
+            results.append({**base, "success": True, "detail": f"{verb} '{key_name}' ({environment_name}) was not present"})
+        else:
+            results.append({**base, "success": False, "detail": f"{verb} '{key_name}' ({environment_name}): {stderr.strip()}"})
+    return results
 
 
 async def sync_all_for_project(

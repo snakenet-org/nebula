@@ -17,9 +17,12 @@
   value rather than reading one. `value` is plain text for every variable_type alike (secret,
   variable, or the new certificate — a certificate is just an uploaded file's text content, stored
   the exact same way a plain secret's value already is, see nebula.models.tables.VariableType).
-@version: 1.3.0
+  VaultEnvironmentResponse (2026-11-08) backs GET /vault/environment — every key/value pair the
+  access key's Project holds in one Environment, as a flat `{name: value}` map (key names are unique
+  per (project, environment), so the map never collides).
+@version: 1.4.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-27
+@date: 2026-11-08
 """
 
 from datetime import datetime
@@ -45,3 +48,9 @@ class VaultStatusResponse(BaseModel):
 class VaultProjectResponse(BaseModel):
     name: str
     description: str | None
+
+
+class VaultEnvironmentResponse(BaseModel):
+    project: str
+    environment: str
+    values: dict[str, str]
