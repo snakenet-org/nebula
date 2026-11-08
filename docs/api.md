@@ -171,7 +171,7 @@ automatically — it can only be renewed by overwriting its value with a fresh u
 Every `GET` route below requires only a project access key (no `X-Nebula-Token`, no human JWT).
 `PUT /vault/secret` additionally requires `X-Nebula-Token` — see Authentication above. Every call,
 success or failure, is audit-logged (`nebula.audit`, actions `vault.retrieve` / `vault.update` /
-`vault.project` / `vault.status`) and rolled up into the Dashboard's "API requests / day" and
+`vault.environment` / `vault.project` / `vault.status`) and rolled up into the Dashboard's "API requests / day" and
 "Failed attempts / day" charts.
 
 ### `GET /vault/secret?key=<name>&environment=<name>`
@@ -209,6 +209,30 @@ stored encrypted the same way a plain secret's value already is. A key that's a 
 key's value (see the Secrets section below) can't be changed here either — `409`, same as the human
 API — its value can only be changed by editing the source key, in its own Project. Audited as
 `vault.update`.
+
+### `GET /vault/environment?environment=<name>`
+
+Returns every key/value pair the access key's Project holds in one Environment, as a flat map.
+
+```
+Authorization: Bearer nbv_...
+```
+
+```json
+{
+  "project": "my-project",
+  "environment": "production",
+  "values": { "DATABASE_URL": "postgres://...", "LOG_LEVEL": "info" }
+}
+```
+
+The `environment` match is case-insensitive. Every key type is included: secrets, environment
+variables and certificates. A reference key returns its source key's current value, and a key with
+no value set is left out instead of failing the call. An unknown environment is a `404`. An
+environment that exists but has no keys in this Project returns `200` with an empty `values` map.
+Each call writes one `vault.environment` audit row, which counts once in the Dashboard's
+request charts, plus one `vault.environment.key` row per returned key, so each key's extraction
+count stays accurate.
 
 ### `GET /vault/project`
 

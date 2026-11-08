@@ -1,7 +1,8 @@
 #    (c) snakenet.org, All rights reserved
 """
-@ai-purpose: GET /api/v1/vault/secret + PUT /api/v1/vault/secret + GET /api/v1/vault/project +
-  GET /api/v1/vault/status — the external, machine-to-machine surface. The three GET routes are
+@ai-purpose: GET /api/v1/vault/secret + PUT /api/v1/vault/secret + GET /api/v1/vault/environment +
+  GET /api/v1/vault/project + GET /api/v1/vault/status — the external, machine-to-machine surface.
+  The four GET routes are
   gated on a project access key ALONE, no X-Nebula-Token; PUT /secret (2026-08-27, changes a value)
   is the one exception and requires BOTH.
 @ai-context: This whole router is a THIRD auth mode alongside human-JWT (project.py/secret.py/...)
@@ -73,13 +74,23 @@
   best-effort, exactly like every other value-changing route in this app (this module's own
   `_auto_sync_github`, attributed to the access key via record_access_key_action rather than a human
   UserAccount).
+  2026-11-08: new `GET /environment?environment=<name>` — every key/value pair the access key's
+  Project holds in that one Environment, as a flat `{name: value}` map (same auth as GET /secret:
+  the access key alone, no X-Nebula-Token). Every variable_type is included (secret, environment
+  variable, certificate), a reference key resolves to its SOURCE's current value (reveal_value), and
+  a key with no value set is simply omitted rather than failing the whole call. An unknown
+  Environment is a 404 (audited success=False); a known Environment with zero keys in this Project
+  is a 200 with an empty map — environments are global, so "exists but empty here" isn't leaking
+  anything a caller couldn't already learn. Audited as one "vault.environment" summary row per
+  request plus one "vault.environment.key" row per returned key (object_id=key.id) so per-key
+  extraction counts stay accurate — see nebula.audit's 2026-11-08 docstring entry.
 @ai-rules:
   - Never log the resolved plaintext value.
   - Maintain 100% type-hinting coverage.
 @dependencies: fastapi, sqlalchemy[asyncio]
-@version: 6.0.1
+@version: 6.1.0
 @author: Marc Fiedler <marc@snakenet.org>
-@date: 2026-08-27
+@date: 2026-11-08
 """
 
 import uuid
@@ -99,8 +110,9 @@ from nebula import secrets as secrets_service
 from nebula import version
 from nebula.api.endpoint import Endpoint, verify_nebula_token
 from nebula.database import get_session
-from nebula.models.tables import Project, ProjectAccessKey
+from nebula.models.tables import Project, ProjectAccessKey, SecretKey
 from nebula.models.vault import (
+    VaultEnvironmentResponse,
     VaultProjectResponse,
     VaultSecretResponse,
     VaultSecretSetRequest,
@@ -181,6 +193,13 @@ class VaultRouter(Endpoint):
             # Unlike every other route on this router, writing a value also requires X-Nebula-Token
             # on top of the project access key — see the module docstring for why.
             dependencies=[Depends(verify_nebula_token)],
+        )
+        self.add_api_route(
+            "/environment",
+            self.get_environment,
+            methods=["GET"],
+            response_model=VaultEnvironmentResponse,
+            summary="Retrieve every key/value pair of the access key's Project in one environment",
         )
         self.add_api_route(
             "/status",
@@ -321,6 +340,84 @@ class VaultRouter(Endpoint):
         await _audit(success=True, object_id=secret_key.id)
         await _auto_sync_github(session, access_key, request, resolved_project.id)
         return VaultSecretResponse(key=secret_key.name, environment=env.name, value=payload.value)
+
+    async def get_environment(
+        self,
+        environment: _NameParam,
+        request: Request,
+        resolved: tuple[Project, ProjectAccessKey] = Depends(get_access_key),
+        session: AsyncSession = Depends(get_session),
+    ) -> VaultEnvironmentResponse:
+        """Every key/value pair the resolved Project holds in `environment` — see the module
+        docstring's 2026-11-08 entry. Keys without a value are omitted, not an error."""
+        resolved_project, access_key = resolved
+
+        env = await environments_service.get_environment_by_name(session, environment)
+        if env is None:
+            await audit_service.record_access_key_action(
+                session,
+                access_key_id=access_key.id,
+                access_key_label=access_key.name,
+                request=request,
+                action="vault.environment",
+                object_type="environment",
+                object_label=f"{resolved_project.name}/{environment}",
+                project_id=resolved_project.id,
+                project_label=resolved_project.name,
+                success=False,
+                detail="Unknown environment",
+            )
+            raise HTTPException(status_code=404, detail="Not found")
+
+        keys = [
+            k
+            for k in await secrets_service.list_keys(session, resolved_project.id)
+            if k.environment_id == env.id
+        ]
+        values: dict[str, str] = {}
+        returned_keys: list[SecretKey] = []
+        for secret_key in keys:
+            try:
+                values[secret_key.name] = await secrets_service.reveal_value(session, secret_key)
+            except SecretValueNotFoundError:
+                continue
+            returned_keys.append(secret_key)
+
+        # Per-key extraction rows first (EXTRACTION_ACTIONS only), then the one summary row
+        # (VAULT_ACTIONS) — see nebula.audit's 2026-11-08 docstring entry.
+        for secret_key in returned_keys:
+            await audit_service.record_access_key_action(
+                session,
+                access_key_id=access_key.id,
+                access_key_label=access_key.name,
+                request=request,
+                action="vault.environment.key",
+                object_type="secret_key",
+                object_id=secret_key.id,
+                object_label=f"{resolved_project.name}/{env.name}/{secret_key.name}",
+                project_id=resolved_project.id,
+                project_label=resolved_project.name,
+                success=True,
+            )
+        skipped = len(keys) - len(returned_keys)
+        await audit_service.record_access_key_action(
+            session,
+            access_key_id=access_key.id,
+            access_key_label=access_key.name,
+            request=request,
+            action="vault.environment",
+            object_type="environment",
+            object_id=env.id,
+            object_label=f"{resolved_project.name}/{env.name}",
+            project_id=resolved_project.id,
+            project_label=resolved_project.name,
+            success=True,
+            detail=f"{len(returned_keys)} key(s) returned"
+            + (f", {skipped} without a value skipped" if skipped else ""),
+        )
+        return VaultEnvironmentResponse(
+            project=resolved_project.name, environment=env.name, values=values
+        )
 
     async def get_status(
         self,
