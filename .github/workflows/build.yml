@@ -49,6 +49,12 @@
 # Docker Hub login uses `secrets.DOCKER_ACCESS_KEY` as the password against username `snakenet-org`
 # (confirmed with the user — this repo's Docker Hub org/username, not a per-developer account).
 
+# 2026-11-08: every real job is now gated on `github.repository == 'marc-fiedler/nebula'`. This same
+# workflow file lands in the canonical `snakenet-org/nebula` repo too (via `mirror-main` below), where
+# none of the required secrets/environments exist, so it always failed there. On any repo other than
+# the fork, every real job is skipped (`deploy`/`push` skip automatically via `needs: build-nebula`)
+# and only the trivial `noop` job runs, so the snakenet-org run reports a clean success instead.
+
 name: Build Pipeline for Nebula Vault
 run-name: ${{ github.actor }} is deploying Nebula Vault 🌌
 on:
@@ -60,8 +66,16 @@ on:
       - main
 
 jobs:
+  # Runs ONLY outside the fork (e.g. snakenet-org/nebula) so that workflow run succeeds by default
+  # instead of failing on missing secrets — see the 2026-11-08 header note above.
+  noop:
+    if: github.repository != 'marc-fiedler/nebula'
+    runs-on: ubuntu-latest
+    steps:
+        - run: echo "Build pipeline only runs on marc-fiedler/nebula — nothing to do on ${{ github.repository }}."
+
   build-nebula:
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.repository == 'marc-fiedler/nebula' && startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     environment: prod
     env:
@@ -126,7 +140,7 @@ jobs:
   # rather than a failure-handling step inside the build job itself.
   notify_build_failure:
     needs: build-nebula
-    if: failure()
+    if: failure() && github.repository == 'marc-fiedler/nebula'
     runs-on: ubuntu-latest
     environment: prod
     steps:
@@ -184,7 +198,7 @@ jobs:
   # independently of the tag-triggered jobs above — mirrors the exact merged commit onto the
   # canonical org repo, which `origin` here (a personal fork) is not.
   mirror-main:
-    if: github.ref == 'refs/heads/main'
+    if: github.repository == 'marc-fiedler/nebula' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: prod
     steps:
@@ -212,7 +226,7 @@ jobs:
   # job, using `snakenet-org` here to match the GitHub org name, failed login with 401 unauthorized;
   # Docker Hub's namespace is unrelated to and doesn't have to match the GitHub org name).
   push-dockerhub-latest:
-    if: github.ref == 'refs/heads/main'
+    if: github.repository == 'marc-fiedler/nebula' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: prod
     steps:
