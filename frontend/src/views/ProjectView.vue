@@ -228,7 +228,7 @@
     through that same dialog.
   @dependencies: vue, vue-sonner, @phosphor-icons/vue, shadcn-vue (card, badge, button, input,
     textarea, label, select, switch, tabs, table, tooltip, checkbox, alert-dialog, dialog, skeleton)
-  @version: 10.2.0
+  @version: 10.2.1
   @author: Marc Fiedler <marc@snakenet.org>
   @date: 2026-09-18
 -->
@@ -1217,7 +1217,10 @@ async function saveValue() {
 
           <DialogFooter>
             <Button type="button" variant="outline" @click="closeKeyForm">Cancel</Button>
-            <Button type="submit" :disabled="savingKey || !newKey.environment_id">Create</Button>
+            <Button type="submit" :disabled="savingKey || !newKey.environment_id">
+              <PhCircleNotch v-if="savingKey" :size="16" weight="bold" class="animate-spin" />
+              {{ savingKey ? 'Creating…' : 'Create' }}
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
